@@ -1,5 +1,7 @@
 # Halcyon H9
 
+Live: https://racing.ticoag.fun
+
 An original, fully procedural hypercar built with three.js — no model files, everything is generated in code.
 
 - Configurator: 6 presets, 10 colours × 7 finishes (metallic, pearl, gloss, matte, chrome, chameleon, carbon), 4 wheel designs, rim and caliper colours, GT wing / active spoiler / no wing, track and road aero kits, 5 liveries, 4 interiors
@@ -52,7 +54,7 @@ The Cloudflare Pages project `racing` is connected to this repository and builds
 - Build command: `npm ci && python3 build.py`
 - Build output directory: `public`
 
-Pushes to `main` go to production; other branches get preview URLs.
+Pushes to `main` go to production at https://racing.ticoag.fun (also https://racing-ddu.pages.dev); other branches get preview URLs.
 
 ## Tools
 
