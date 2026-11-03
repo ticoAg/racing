@@ -1,0 +1,431 @@
+<title>Halcyon H9</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,100..900;1,62..125,100..900&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<style>
+/* Layout: full-bleed studio canvas; wordmark top-left; configurator panel docked right (bottom sheet on phones);
+   one action rail bottom-centre for doors, wing, lights, poses and camera.
+   Deliberately single-theme: a dark photo studio, so every colour is set explicitly. */
+:root {
+  --studio: #0c0d10;
+  --ink: #ecebe6;
+  --ink-dim: #9b9ea6;
+  --ink-faint: #6e717a;
+  --glass: rgba(15, 16, 20, 0.72);
+  --line: rgba(236, 235, 230, 0.10);
+  --line-strong: rgba(236, 235, 230, 0.46);
+  --wash: rgba(236, 235, 230, 0.08);
+  --wash-strong: rgba(236, 235, 230, 0.14);
+  --livery-red: #d0102c;
+  --font-display: "Archivo", "Noto Sans SC", "Arial Black", sans-serif;
+  --font-ui: "Archivo", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --panel-w: 332px;
+  --gutter-r: max(16px, env(safe-area-inset-right, 0px));
+  --gutter-l: max(16px, env(safe-area-inset-left, 0px));
+  --panel-space: 0px;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--studio);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+button { font-family: inherit; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+#scene {
+  position: fixed; inset: 0;
+  width: 100%; height: 100%;
+  display: block;
+  touch-action: none;
+  cursor: grab;
+  outline: none;
+}
+#scene:active { cursor: grabbing; }
+
+.mark {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 20px);
+  left: var(--gutter-l);
+  margin-left: 6px;
+  display: flex; align-items: center; gap: 12px;
+  pointer-events: none;
+  opacity: 0; transform: translateY(-4px);
+  transition: opacity .8s ease .4s, transform .8s ease .4s;
+}
+.mark-brand { font-family: var(--font-display); font-style: italic; font-weight: 800; font-stretch: 125%; font-size: 15px; letter-spacing: 0.24em; }
+.mark-model { font-weight: 300; font-size: 15px; letter-spacing: 0.08em; color: var(--ink-dim); padding-left: 12px; border-left: 1px solid var(--line); }
+.mark-model b { font-weight: 700; color: var(--livery-red); }
+
+/* ---------- action rail ---------- */
+body.panel-open { --panel-space: calc(var(--panel-w) + var(--gutter-r) + 8px); }
+.rail {
+  position: fixed;
+  left: calc((100% - var(--panel-space)) / 2);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+  transform: translate(-50%, 8px);
+  width: max-content;
+  max-width: calc(100% - var(--panel-space) - var(--gutter-l) - var(--gutter-r));
+  box-sizing: border-box;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+  gap: 8px 12px;
+  padding: 7px 10px;
+  background: var(--glass);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  backdrop-filter: blur(16px) saturate(1.2);
+  opacity: 0;
+  transition: opacity .7s ease .6s, transform .7s ease .6s, left .45s ease;
+}
+.group { display: flex; align-items: center; gap: 2px; }
+.sep { width: 1px; height: 20px; background: var(--line); }
+.rail.wrapped { border-radius: 22px; }
+.rail.wrapped .sep { display: none; }
+.rail.wrapped .group { flex-wrap: wrap; justify-content: center; }
+.rail.measure { width: max-content; max-width: none; flex-wrap: nowrap; }
+.rail.measure .sep { display: block; }
+.rail.measure .group { flex-wrap: nowrap; }
+.tog {
+  width: 34px; height: 34px; padding: 0;
+  display: grid; place-items: center;
+  border: 0; border-radius: 50%;
+  background: transparent; color: var(--ink-dim);
+  cursor: pointer;
+  transition: background .2s ease, color .2s ease, opacity .2s ease;
+}
+.tog svg { width: 18px; height: 18px; }
+.tog:hover { color: var(--ink); }
+.tog[aria-pressed="true"] { color: var(--ink); background: var(--wash-strong); }
+.tog:disabled { opacity: .3; cursor: default; }
+.seg {
+  height: 30px; padding: 0 11px;
+  border: 0; border-radius: 999px;
+  background: transparent; color: var(--ink-dim);
+  font-size: 12.5px; font-weight: 500; letter-spacing: 0.06em; line-height: 1;
+  cursor: pointer;
+  transition: color .2s ease, background .2s ease;
+}
+.seg:hover { color: var(--ink); }
+.seg[aria-checked="true"], .seg[aria-current="true"] { color: var(--ink); background: var(--wash-strong); }
+.poses .seg[aria-checked="true"] { box-shadow: inset 0 -2px 0 var(--livery-red); }
+
+.tog[data-toggle="sound"] .snd-off { display: none; }
+.tog[data-toggle="sound"][aria-pressed="false"] .snd-on { display: none; }
+.tog[data-toggle="sound"][aria-pressed="false"] .snd-off { display: inline; opacity: .7; }
+
+/* ---------- telemetry ---------- */
+.hud {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 56px);
+  left: var(--gutter-l);
+  margin-left: 6px;
+  width: 172px;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  background: var(--glass);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  backdrop-filter: blur(16px) saturate(1.2);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0; transform: translateY(-4px);
+  transition: opacity .4s ease, transform .4s ease;
+}
+body.hud-on .hud { opacity: 1; transform: none; }
+.hud-top { display: flex; align-items: baseline; gap: 6px; }
+.hud-speed { font-family: var(--font-display); font-style: italic; font-weight: 800; font-size: 34px; line-height: 1; min-width: 2.2ch; }
+.hud-unit { font-size: 11px; color: var(--ink-dim); letter-spacing: .08em; }
+.hud-gear { margin-left: auto; align-self: center; font-family: var(--font-display); font-weight: 800; font-size: 20px; line-height: 1; padding: 4px 7px; border: 1px solid var(--line-strong); border-radius: 7px; min-width: 1ch; text-align: center; }
+.hud-rpm { height: 3px; margin: 11px 0 12px; background: var(--wash-strong); border-radius: 2px; overflow: hidden; }
+.hud-rpm i { display: block; height: 100%; background: var(--ink); transform-origin: left; transform: scaleX(0); transition: background .2s; }
+.hud-rpm i.red { background: var(--livery-red); }
+.hud-g { display: flex; align-items: center; gap: 12px; }
+.hud-g svg { width: 50px; height: 50px; flex: none; fill: none; stroke: rgba(236,235,230,.22); stroke-width: 1.2; }
+.hud-g .dot { fill: var(--livery-red); stroke: none; }
+.hud-g span { font-size: 12px; color: var(--ink-dim); }
+.hud-g b { font-size: 18px; color: var(--ink); font-weight: 700; }
+.hud-aero { display: none; margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line); gap: 6px; }
+body.aero-on .hud-aero { display: grid; }
+.hud-aero div { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; }
+.hud-aero dt { color: var(--ink-dim); }
+.hud-aero dd { margin: 0; color: var(--ink-dim); }
+.hud-aero b { color: var(--ink); font-weight: 700; font-size: 13px; }
+
+/* ---------- configurator panel ---------- */
+.panel {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 16px);
+  right: var(--gutter-r);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+  width: var(--panel-w);
+  display: flex; flex-direction: column;
+  background: var(--glass);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  backdrop-filter: blur(18px) saturate(1.2);
+  transform: translateX(calc(100% + 40px));
+  visibility: hidden;
+  transition: transform .45s ease, visibility 0s linear .45s;
+  z-index: 3;
+}
+body.panel-open .panel { transform: none; visibility: visible; transition: transform .45s ease, visibility 0s; }
+.panel-head { display: flex; align-items: center; gap: 4px; padding: 8px 8px 8px 10px; border-bottom: 1px solid var(--line); }
+.tabs { display: flex; gap: 2px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  flex: none; height: 32px; padding: 0 9px;
+  border: 0; border-radius: 999px;
+  background: transparent; color: var(--ink-dim);
+  font-size: 13px; font-weight: 500; letter-spacing: 0.02em;
+  cursor: pointer;
+}
+.tab:hover { color: var(--ink); }
+.tab[aria-selected="true"] { color: var(--ink); background: var(--wash-strong); }
+.panel-close { flex: none; }
+.panel-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 16px 20px; scrollbar-width: thin; }
+.pane { display: grid; gap: 22px; }
+.pane[hidden] { display: none; }
+.field { display: grid; gap: 11px; }
+.field-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.field-head h3 { margin: 0; font-size: 12px; font-weight: 500; letter-spacing: 0.14em; color: var(--ink-faint); }
+.field-head span { font-size: 12px; color: var(--ink-dim); }
+
+.sw-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px 8px; justify-items: center; }
+.sw-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.sw {
+  width: 34px; height: 34px; padding: 0;
+  border: 0; border-radius: 50%;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+.sw.sm { width: 28px; height: 28px; }
+.sw:hover { transform: scale(1.08); }
+.sw[aria-checked="true"] { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14), 0 0 0 2px var(--studio), 0 0 0 3.5px var(--ink); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 34px; padding: 0 12px;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: transparent; color: var(--ink-dim);
+  font-size: 13px; font-weight: 500; line-height: 1;
+  cursor: pointer;
+  transition: color .2s ease, border-color .2s ease, background .2s ease;
+}
+.chip:hover { color: var(--ink); border-color: rgba(236,235,230,0.22); }
+.chip[aria-checked="true"] { color: var(--ink); border-color: var(--line-strong); background: var(--wash); }
+.chips.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.chip.tile { flex-direction: column; justify-content: center; height: auto; padding: 12px 8px 10px; border-radius: 14px; gap: 8px; }
+.chip.tile svg { width: 40px; height: 32px; }
+.chip.tile span { font-size: 12.5px; }
+.fin { width: 18px; height: 18px; border-radius: 50%; flex: none; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.16); }
+.fin[data-fin="metallic"] { background: radial-gradient(circle at 32% 28%, var(--p1), var(--p2) 48%, var(--p3)); }
+.fin[data-fin="pearl"] { background: radial-gradient(circle at 72% 76%, rgba(255,196,240,0.55), transparent 55%), radial-gradient(circle at 32% 28%, #ffffff, var(--p1) 24%, var(--p2) 58%, var(--p3)); }
+.fin[data-fin="solid"] { background: radial-gradient(circle at 32% 26%, rgba(255,255,255,0.9) 0 7%, var(--p2) 20%, var(--p2) 72%, var(--p3)); }
+.fin[data-fin="matte"] { background: var(--p2); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06); }
+.fin[data-fin="chrome"] { background: linear-gradient(160deg, #ffffff 0%, var(--p1) 22%, #0e0e10 46%, var(--p1) 60%, #ffffff 76%, var(--p3) 100%); }
+.fin[data-fin="chameleon"] { background: conic-gradient(from 210deg, #6b2fd6, #0fb5b0, #e6c04a, #c2306b, #6b2fd6); }
+.fin[data-fin="carbon"] { background: repeating-linear-gradient(45deg, #2c2d31 0 3px, #101113 3px 6px); }
+.duo { width: 18px; height: 18px; border-radius: 50%; flex: none; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.16); }
+
+.presets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.preset {
+  display: grid; gap: 12px; justify-items: start;
+  padding: 14px 12px 12px;
+  border: 1px solid var(--line); border-radius: 16px;
+  background: transparent; color: var(--ink-dim);
+  cursor: pointer; text-align: left;
+  transition: border-color .2s ease, background .2s ease, color .2s ease;
+}
+.preset:hover { border-color: rgba(236,235,230,0.22); color: var(--ink); }
+.preset[aria-checked="true"] { border-color: var(--line-strong); background: var(--wash); color: var(--ink); }
+.preset-look { display: flex; align-items: center; }
+.pc { width: 22px; height: 22px; border-radius: 50%; box-shadow: 0 0 0 2px #14151a; margin-left: -6px; }
+.pc.big { width: 34px; height: 34px; margin-left: 0; }
+.pc.small { width: 14px; height: 14px; }
+.preset-name { font-size: 13.5px; font-weight: 500; letter-spacing: 0.04em; }
+
+button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* ---------- loader ---------- */
+.loader {
+  position: fixed; inset: 0;
+  display: grid; place-items: center; align-content: center; gap: 18px;
+  background: var(--studio);
+  transition: opacity .9s ease;
+  z-index: 5;
+  padding-left: var(--gutter-l); padding-right: var(--gutter-r);
+}
+.loader-mark { font-family: var(--font-display); font-style: italic; font-weight: 800; font-stretch: 125%; font-size: clamp(22px, 5vw, 34px); letter-spacing: 0.3em; padding-left: 0.3em; }
+.loader-track { width: min(220px, 60vw); height: 2px; background: var(--line); overflow: hidden; }
+#loader-bar { height: 100%; background: var(--ink); transform: scaleX(0.02); transform-origin: left; transition: transform .35s ease; }
+#loader-msg { min-height: 1em; max-width: 36ch; text-align: center; font-size: 13px; line-height: 1.5; color: var(--ink-dim); }
+
+body.is-ready .loader { opacity: 0; pointer-events: none; }
+body.is-ready .mark { opacity: 1; transform: none; }
+body.is-ready .rail { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---------- phones and narrow windows: panel becomes a bottom sheet ---------- */
+@media (max-width: 899px) and (max-aspect-ratio: 5/4), (max-width: 639px) {
+  body.panel-open { --panel-space: 0px; }
+  .panel {
+    top: auto; left: var(--gutter-l); right: var(--gutter-r);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+    width: auto; max-height: min(64%, 560px);
+    transform: translateY(calc(100% + 32px));
+  }
+  body.panel-open .rail { opacity: 0; pointer-events: none; }
+  .rail { border-radius: 20px; padding: 8px; gap: 6px 8px; width: calc(100% - var(--gutter-l) - var(--gutter-r)); }
+  .rail .sep { display: none; }
+  .rail .group { flex-wrap: wrap; justify-content: center; }
+  .seg { padding: 0 9px; letter-spacing: 0.02em; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mark, .rail, .loader, .sw, .tog, .seg, .chip, .preset, .panel, #loader-bar { transition: none; }
+}
+</style>
+
+<canvas id="scene" aria-label="工作室中的 Halcyon H9 超跑。拖动旋转，滚轮或双指缩放。"></canvas>
+
+<header class="mark" aria-label="Halcyon H9">
+  <span class="mark-brand">HALCYON</span>
+  <span class="mark-model"><b>H</b>9</span>
+</header>
+
+<div class="hud" id="hud" aria-hidden="true">
+  <div class="hud-top"><span class="hud-speed" id="hudSpeed">0</span><span class="hud-unit">km/h</span><span class="hud-gear" id="hudGear">–</span></div>
+  <div class="hud-rpm"><i id="hudRpm"></i></div>
+  <div class="hud-g">
+    <svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="27"/><circle cx="32" cy="32" r="13.5"/><path d="M5 32h54M32 5v54"/><circle id="hudGDot" class="dot" cx="32" cy="32" r="4.2"/></svg>
+    <span><b id="hudG">0.00</b> G</span>
+  </div>
+  <dl class="hud-aero">
+    <div><dt>下压力</dt><dd><b id="hudDown">0</b> kg</dd></div>
+    <div><dt>阻力</dt><dd><b id="hudDrag">0</b> N</dd></div>
+    <div><dt>前轴</dt><dd><b id="hudBal">0</b>%</dd></div>
+  </dl>
+</div>
+
+<aside class="panel" id="panel" aria-label="车辆配置">
+  <div class="panel-head">
+    <div class="tabs" role="tablist" aria-label="配置类别">
+      <button class="tab" role="tab" type="button" data-tab="style" aria-controls="pane-style">风格</button>
+      <button class="tab" role="tab" type="button" data-tab="paint" aria-controls="pane-paint">漆面</button>
+      <button class="tab" role="tab" type="button" data-tab="wheels" aria-controls="pane-wheels">轮毂</button>
+      <button class="tab" role="tab" type="button" data-tab="kit" aria-controls="pane-kit">套件</button>
+      <button class="tab" role="tab" type="button" data-tab="livery" aria-controls="pane-livery">涂装</button>
+      <button class="tab" role="tab" type="button" data-tab="cabin" aria-controls="pane-cabin">内饰</button>
+    </div>
+    <button class="tog panel-close" type="button" data-panel-close aria-label="收起配置" title="收起">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg>
+    </button>
+  </div>
+  <div class="panel-body">
+    <section class="pane" id="pane-style" data-pane="style" role="tabpanel">
+      <div class="presets" id="presets" role="radiogroup" aria-label="风格预设"></div>
+    </section>
+    <section class="pane" id="pane-paint" data-pane="paint" role="tabpanel" hidden>
+      <div class="field">
+        <div class="field-head"><h3>颜色</h3><span id="paintName"></span></div>
+        <div class="sw-grid" id="paints" role="radiogroup" aria-label="颜色"></div>
+      </div>
+      <div class="field">
+        <div class="field-head"><h3>涂层</h3><span id="finishName"></span></div>
+        <div class="chips" id="finishes" role="radiogroup" aria-label="涂层"></div>
+      </div>
+    </section>
+    <section class="pane" id="pane-wheels" data-pane="wheels" role="tabpanel" hidden>
+      <div class="field">
+        <div class="field-head"><h3>样式</h3></div>
+        <div class="chips tiles" id="wheelDesigns" role="radiogroup" aria-label="轮毂样式"></div>
+      </div>
+      <div class="field">
+        <div class="field-head"><h3>轮毂涂层</h3><span id="rimName"></span></div>
+        <div class="sw-row" id="rims" role="radiogroup" aria-label="轮毂涂层"></div>
+      </div>
+      <div class="field">
+        <div class="field-head"><h3>卡钳</h3><span id="caliperName"></span></div>
+        <div class="sw-row" id="calipers" role="radiogroup" aria-label="卡钳颜色"></div>
+      </div>
+    </section>
+    <section class="pane" id="pane-kit" data-pane="kit" role="tabpanel" hidden>
+      <div class="field">
+        <div class="field-head"><h3>尾翼</h3></div>
+        <div class="chips" id="wings" role="radiogroup" aria-label="尾翼"></div>
+      </div>
+      <div class="field">
+        <div class="field-head"><h3>空力</h3></div>
+        <div class="chips" id="kits" role="radiogroup" aria-label="空力套件"></div>
+      </div>
+    </section>
+    <section class="pane" id="pane-livery" data-pane="livery" role="tabpanel" hidden>
+      <div class="chips tiles" id="liveries" role="radiogroup" aria-label="涂装"></div>
+    </section>
+    <section class="pane" id="pane-cabin" data-pane="cabin" role="tabpanel" hidden>
+      <div class="chips" id="cabins" role="radiogroup" aria-label="内饰"></div>
+    </section>
+  </div>
+</aside>
+
+<nav class="rail" aria-label="动态控制">
+  <div class="group toggles">
+    <button class="tog" type="button" data-toggle="doors" aria-label="车门" title="车门">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M4.5 19.5V11l5.5-6.5h9.5v15z"/><path d="M4.8 11.2h14.4M14.5 14.5h2"/></svg>
+    </button>
+    <button class="tog" type="button" data-toggle="wing" aria-label="尾翼" title="尾翼">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5c5-1.6 13-1.6 18 0l-1.6 2.6C14.5 9 9.5 9 4.6 10.1z"/><path d="M8.5 9.6c-.6 3 .2 6.4 1 9.4M15.5 9.6c.6 3-.2 6.4-1 9.4"/></svg>
+    </button>
+    <button class="tog" type="button" data-toggle="lights" aria-label="灯光" title="灯光">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.5 5.5C8 5.5 4.5 8.2 4.5 12s3.5 6.5 8 6.5h1v-13h-1z"/><path d="M16.5 7.5l4-1M16.5 12h4.5M16.5 16.5l4 1"/></svg>
+    </button>
+    <button class="tog" type="button" data-toggle="aero" aria-label="气流" title="气流">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 8.5h9.5a2.5 2.5 0 1 0-2.5-2.5"/><path d="M3 12.5h14a2.5 2.5 0 1 1-2.5 2.5"/><path d="M3 16.5h6.5"/></svg>
+    </button>
+    <button class="tog" type="button" data-toggle="sound" aria-label="声音" title="声音">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 9.5h3l4.5-4v13l-4.5-4h-3z"/><path class="snd-on" d="M15.5 9.2a4 4 0 0 1 0 5.6M18.2 6.6a7.6 7.6 0 0 1 0 10.8"/><path class="snd-off" d="M16 9.5l5 5M21 9.5l-5 5"/></svg>
+    </button>
+    <button class="tog" type="button" data-toggle="turntable" aria-label="自动旋转" title="自动旋转">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.8 4.6v3.6h-3.6"/><ellipse cx="12" cy="17.5" rx="5" ry="1.4" stroke-width="1.2" opacity=".6"/></svg>
+    </button>
+    <button class="tog" type="button" data-toggle="panel" aria-label="配置" title="配置">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9M4 12h5M13 12h7"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/><circle cx="11" cy="12" r="2"/></svg>
+    </button>
+  </div>
+  <span class="sep" aria-hidden="true"></span>
+  <div class="group poses" role="radiogroup" aria-label="姿态">
+    <button class="seg" type="button" role="radio" data-pose="park">静止</button>
+    <button class="seg" type="button" role="radio" data-pose="cruise">巡航</button>
+    <button class="seg" type="button" role="radio" data-pose="corner">过弯</button>
+    <button class="seg" type="button" role="radio" data-pose="brake">制动</button>
+  </div>
+  <span class="sep" aria-hidden="true"></span>
+  <div class="group views" aria-label="视角">
+    <button class="seg" type="button" data-view="front">前视</button>
+    <button class="seg" type="button" data-view="side">侧视</button>
+    <button class="seg" type="button" data-view="rear">后视</button>
+    <button class="seg" type="button" data-view="top">俯视</button>
+    <button class="seg" type="button" data-view="wheel">轮毂</button>
+    <button class="seg" type="button" data-view="cabin">座舱</button>
+    <button class="seg" type="button" data-view="driver">驾驶</button>
+  </div>
+</nav>
+
+<div class="loader" aria-live="polite">
+  <div class="loader-mark">HALCYON</div>
+  <div class="loader-track"><div id="loader-bar"></div></div>
+  <div id="loader-msg"></div>
+</div>
+
+__TESTFLAG__
+<script type="importmap">__IMPORTMAP__</script>
+<script type="module">
+__SCRIPT__
+</script>
