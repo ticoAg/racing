@@ -1,29 +1,78 @@
-"""Build the single-page app.
+"""Build the single-page app into public/ (the Cloudflare Pages output directory).
 
-public/index.html  – production page (three.js from jsDelivr), deployed by Cloudflare Pages
-dev/test.html      – local three.js + window.__TEST__ hooks, used by tools/*.js
-dev/live.html      – local three.js, normal runtime
+public/index.html                    page with all app code inlined
+public/vendor/three@<ver>/...        only the three.js modules the page imports (from node_modules)
+public/fonts/                        subset fonts, committed (see tools/subset_fonts.py)
+dev/test.html, dev/live.html         same page with window.__TEST__ hooks / plain, for tools/*.js
+
+Requires `npm install` (or `npm ci`) first so node_modules/three exists.
 """
-import json, os, re
+import json, os, re, shutil
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(ROOT, 'src')
+PUB = os.path.join(ROOT, 'public')
+THREE = os.path.join(ROOT, 'node_modules', 'three')
 
-def read(name):
-    with open(os.path.join(SRC, name), encoding='utf-8') as f:
+def read(path):
+    with open(path, encoding='utf-8') as f:
         return f.read()
 
-js = re.sub(r'/\*@include ([\w.]+)\*/', lambda m: read(m.group(1)), read('car.js'))
+def write(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(text)
+
+if not os.path.exists(os.path.join(THREE, 'package.json')):
+    raise SystemExit('node_modules/three is missing: run `npm ci` first')
+VER = json.loads(read(os.path.join(THREE, 'package.json')))['version']
+VBASE = f'/vendor/three@{VER}/'
+
+# ---- app script ----
+js = re.sub(r'/\*@include ([\w.]+)\*/', lambda m: read(os.path.join(SRC, m.group(1))), read(os.path.join(SRC, 'car.js')))
 assert '</script' not in js
-tpl = read('page.template.html')
 
-CDN = {"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
-                   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}
-LOCAL = {"imports": {"three": "/node_modules/three/build/three.module.js",
-                     "three/addons/": "/node_modules/three/examples/jsm/"}}
+# ---- vendor three.js: follow static imports from the page's entry points ----
+IMPORT = re.compile(r'''(?:import|export)\s[^'"]*?from\s*['"]([^'"]+)['"]|import\s*['"]([^'"]+)['"]''')
+def to_file(spec):
+    if spec == 'three':
+        return 'build/three.module.js'
+    if spec.startswith('three/addons/'):
+        return 'examples/jsm/' + spec[len('three/addons/'):]
+    raise ValueError(spec)
+todo = [to_file(m.group(1) or m.group(2)) for m in IMPORT.finditer(js)]
+seen = set()
+while todo:
+    rel = todo.pop()
+    if rel in seen:
+        continue
+    seen.add(rel)
+    for m in IMPORT.finditer(read(os.path.join(THREE, rel))):
+        spec = m.group(1) or m.group(2)
+        if spec == 'three' or spec.startswith('three/'):
+            todo.append(to_file(spec))
+        elif spec.startswith('.'):
+            todo.append(os.path.normpath(os.path.join(os.path.dirname(rel), spec)).replace(os.sep, '/'))
+shutil.rmtree(os.path.join(PUB, 'vendor'), ignore_errors=True)
+for rel in sorted(seen):
+    dst = os.path.join(PUB, 'vendor', f'three@{VER}', rel)
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    shutil.copyfile(os.path.join(THREE, rel), dst)
+shutil.copyfile(os.path.join(THREE, 'LICENSE'), os.path.join(PUB, 'vendor', f'three@{VER}', 'LICENSE'))
+importmap = {"imports": {"three": VBASE + 'build/three.module.js', "three/addons/": VBASE + 'examples/jsm/'}}
 
-def page(importmap, test=False):
+# ---- fonts ----
+fonts_css = read(os.path.join(SRC, 'fonts.css'))
+preload = '\n'.join(
+    f'<link rel="preload" href="{u}" as="font" type="font/woff2" crossorigin>'
+    for u in re.findall(r'url\("([^"]+)"\)', fonts_css) if 'italic' not in u)
+preload += f'\n<link rel="modulepreload" href="{VBASE}build/three.module.js">'
+
+tpl = read(os.path.join(SRC, 'page.template.html'))
+def page(test=False):
     body = (tpl.replace('__IMPORTMAP__', json.dumps(importmap))
+               .replace('__PRELOAD__', preload)
+               .replace('__FONTS__', fonts_css)
                .replace('__SCRIPT__', js)
                .replace('__TESTFLAG__', '<script>window.__TEST__ = true;</script>' if test else ''))
     head, rest = body.split('<style>', 1)
@@ -33,13 +82,11 @@ def page(importmap, test=False):
             '<meta name="theme-color" content="#0c0d10">\n'
             + head + '<style>' + rest.replace('</style>', '</style>\n</head>\n<body>', 1) + '\n</body>\n</html>\n')
 
-def write(rel, text):
-    path = os.path.join(ROOT, rel)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(text)
-
-write('public/index.html', page(CDN))
-write('dev/test.html', page(LOCAL, test=True))
-write('dev/live.html', page(LOCAL))
-print('built public/index.html', os.path.getsize(os.path.join(ROOT, 'public/index.html')) // 1024, 'KB')
+write(os.path.join(PUB, 'index.html'), page())
+write(os.path.join(ROOT, 'dev', 'test.html'), page(test=True))
+write(os.path.join(ROOT, 'dev', 'live.html'), page())
+size = sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(os.path.join(PUB, 'vendor')) for f in fs)
+print(f'built public/index.html ({os.path.getsize(os.path.join(PUB, "index.html")) // 1024} KB), '
+      f'vendored {len(seen)} three.js modules ({size // 1024} KB)')
+for rel in sorted(seen):
+    print('  ', rel)

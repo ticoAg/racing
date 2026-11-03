@@ -2,4 +2,6 @@ node_modules/
 dev/
 out/
 .wrangler/
+.fontcache/
 public/index.html
+public/vendor/

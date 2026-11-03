@@ -1,7 +1,13 @@
 const http = require('http'), fs = require('fs'), path = require('path');
 const { chromium } = require('playwright');
 const root = path.join(__dirname, '..'), types = { '.html': 'text/html', '.js': 'text/javascript' };
-const server = http.createServer((req, res) => { const p = path.join(root, decodeURIComponent(req.url.split('?')[0])); fs.readFile(p, (e, d) => { if (e) { res.writeHead(404); res.end(); return; } res.writeHead(200, { 'Content-Type': types[path.extname(p)] || 'application/octet-stream' }); res.end(d); }); });
+const server = http.createServer((req, res) => {
+  const url = decodeURIComponent(req.url.split('?')[0]);
+  const types = { '.html': 'text/html', '.js': 'text/javascript', '.woff2': 'font/woff2', '.css': 'text/css' };
+  // repo root first (dev/ pages, node_modules), then public/ (vendor/, fonts/) — mirrors the deployed site
+  const tryRead = (paths) => { const p = paths.shift(); fs.readFile(p, (e, d) => { if (e) { if (paths.length) return tryRead(paths); res.writeHead(404); return res.end(); } res.writeHead(200, { 'Content-Type': types[path.extname(p)] || 'application/octet-stream' }); res.end(d); }); };
+  tryRead([path.join(root, url), path.join(root, 'public', url)]);
+});
 (async () => {
   await new Promise(r => server.listen(8768, r));
   const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });

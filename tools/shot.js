@@ -4,8 +4,11 @@ const { chromium } = require('playwright');
 const root = path.join(__dirname, '..');
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json' };
 const server = http.createServer((req, res) => {
-  const p = path.join(root, decodeURIComponent(req.url.split('?')[0]));
-  fs.readFile(p, (err, data) => { if (err) { res.writeHead(404); res.end(); return; } res.writeHead(200, { 'Content-Type': types[path.extname(p)] || 'application/octet-stream' }); res.end(data); });
+  const url = decodeURIComponent(req.url.split('?')[0]);
+  const types = { '.html': 'text/html', '.js': 'text/javascript', '.woff2': 'font/woff2', '.css': 'text/css' };
+  // repo root first (dev/ pages, node_modules), then public/ (vendor/, fonts/) — mirrors the deployed site
+  const tryRead = (paths) => { const p = paths.shift(); fs.readFile(p, (e, d) => { if (e) { if (paths.length) return tryRead(paths); res.writeHead(404); return res.end(); } res.writeHead(200, { 'Content-Type': types[path.extname(p)] || 'application/octet-stream' }); res.end(d); }); };
+  tryRead([path.join(root, url), path.join(root, 'public', url)]);
 });
 const VIEWS = {
   front34: [[5.6, 1.45, 4.9], [0, 0.5, 0]],
