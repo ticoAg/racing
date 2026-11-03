@@ -20,7 +20,7 @@ An original, fully procedural hypercar built with three.js — no model files, e
 | `src/blk_audio.js` | Sound engine and music |
 | `src/page.template.html` | Markup and styles |
 | `build.py` | Inlines everything into `public/index.html` |
-| `public/` | Static site deployed to Cloudflare Pages |
+| `public/` | Static site root (`index.html` is generated, not committed) |
 | `tools/` | Headless Playwright checks (renders, click-through, offline audio levels) |
 
 ## Build and run
@@ -32,13 +32,12 @@ npx serve public          # or any static server
 
 ## Deploy (Cloudflare Pages)
 
-Connect the repository in Cloudflare Pages with:
+The Cloudflare Pages project `racing` is connected to this repository and builds on every push:
 
-- Framework preset: None
-- Build command: `python3 build.py` (or leave empty — the built `public/index.html` is committed)
+- Build command: `python3 build.py`
 - Build output directory: `public`
 
-Or from a terminal: `npx wrangler pages deploy public --project-name halcyon-h9`.
+Pushes to `main` go to production; other branches get preview URLs.
 
 ## Tools
 
