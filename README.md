@@ -6,10 +6,16 @@ An original, fully procedural hypercar built with three.js — no model files, e
 
 - Configurator: 6 presets, 10 colours × 7 finishes (metallic, pearl, gloss, matte, chrome, chameleon, carbon), 4 wheel designs, rim and caliper colours, GT wing / active spoiler / no wing, track and road aero kits, 5 liveries, 4 interiors
 - Butterfly doors, deployable wing and airbrake
-- Detailed cockpit with a first-person driver view
-- Driving programs: cruise, chicane cornering (~1.5 g), braking zone (230 → 80 km/h at ~1.8 g) with suspension dynamics, glowing discs and splitter sparks
-- Airflow view: potential-flow streamlines per longitudinal slice, wake turbulence, tip vortices, surface pressure map, downforce/drag readout
-- Synthesised V12, gearbox, tyre, wind and brake sounds plus showroom music (Web Audio)
+- Detailed cockpit with a first-person driver view that rides the body and leans with the g-forces
+- Vehicle model: V12 torque curve (1045 Nm, ~890 kW), 7-speed dual-clutch box, semi-slick tyres with load sensitivity, drag and downforce per axle, ABS brakes with a torque cap, traction and launch control, active low-drag wing trim at V-max, suspension springs with aero compression
+- Driving programs on a procedurally generated night circuit:
+  - Cruise: launch and V-max run to ~400 km/h (about 30 s with the GT wing, 22 s with the road kit), then holds 400
+  - Corner: fast esses at ~1.85 g with kerb strikes at the apexes
+  - Brake: flat out to ~300 km/h, maximum braking (up to ~2.5 g with the airbrake) into an 82 km/h hairpin past the 300/200/100 boards
+- Night circuit: road with kerbs, patches, rubbered line and skid marks; barriers with catch fences and advertising; floodlight masts whose light pools sweep under the car and whose nearest lamps light the bodywork; gantries; horizon and night sky. The studio dissolves into it from under the car when a program starts and comes back after the car stops. Everything that passes is smeared over a 1/90 s exposure
+- Speed effects: afterfire flames on the same events the sound plays, launch tyre smoke, condensation in the wing-tip vortices, specks streaking through the floodlit air, splitter sparks under braking and bottoming, glowing discs
+- Airflow view: a live lattice-Boltzmann wind tunnel on the GPU (D2Q9, regularised collisions, Smagorinsky LES) in four longitudinal slices, with a rolling road, rotating wheels and the wing/airbrake masked in as they move; smoke-rake streaklines through the solved field, coloured by local speed; tip vortices, surface pressure map, downforce/drag readout. Falls back to potential-flow streamlines where float render targets are missing
+- Sound (Web Audio): a V12 synthesised from the crank angle in an AudioWorklet (firing order, two banks, load, ignition cuts for shifts, limiter and launch control, afterfire), exhaust and intake placed on the car and heard from the camera, a muffled cockpit perspective, wind that climbs steeply with speed, tyre scrub, kerb rumble, patch thumps, barrier echoes and masts whooshing past; showroom music in the studio
 
 ## Layout
 
@@ -17,9 +23,13 @@ An original, fully procedural hypercar built with three.js — no model files, e
 | --- | --- |
 | `src/car.js` | Main module; `/*@include file*/` markers pull in the blocks below |
 | `src/blk_cockpit.js` | Interior |
-| `src/blk_drive.js` | Driving programs, gearbox, suspension, sparks, HUD |
-| `src/blk_aero.js` | Flow solver, streamlines, pressure map, loads |
-| `src/blk_audio.js` | Sound engine and music |
+| `src/blk_track.js` | Procedural circuit: curvature segments per program, racing line, kerbs, boards, centreline in the car frame |
+| `src/blk_world.js` | Road/floor shader, barriers, floodlights, gantries, sky, environment-map blend, studio↔circuit reveal |
+| `src/blk_drive.js` | Vehicle model, speed planner, gearbox, suspension, sparks, HUD |
+| `src/blk_fx.js` | Afterfire, tyre smoke, vortex vapour, specks, cockpit camera rig |
+| `src/blk_aero.js` | Potential-flow fallback, tip vortices, pressure map, loads |
+| `src/blk_flow.js` | Lattice-Boltzmann solver, masks, streaklines |
+| `src/blk_audio.js` | Sound engine (AudioWorklet V12) and music |
 | `src/page.template.html` | Markup and styles |
 | `src/fonts.css` | `@font-face` rules for the self-hosted fonts (generated) |
 | `build.py` | Inlines the app into `public/index.html` and copies the three.js modules it imports into `public/vendor/` |

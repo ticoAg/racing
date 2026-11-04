@@ -433,7 +433,7 @@ function drawCluster() {
   ctx.beginPath(); ctx.arc(160, 215, 62, 0, Math.PI * 2); ctx.stroke();
   ctx.beginPath(); ctx.arc(160, 215, 31, 0, Math.PI * 2); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(98, 215); ctx.lineTo(222, 215); ctx.moveTo(160, 153); ctx.lineTo(160, 277); ctx.stroke();
-  const gx = clamp(d.latG / 2, -1, 1) * 62, gy = clamp(-d.lonG / 2, -1, 1) * 62;
+  const gx = clamp(d.latG / 3, -1, 1) * 62, gy = clamp(-d.lonG / 3, -1, 1) * 62;
   ctx.fillStyle = red; ctx.beginPath(); ctx.arc(160 + gx, 215 + gy, 9, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#7f8b99'; setFont(ctx, 600, 18, 'normal'); ctx.textAlign = 'left';
   ctx.fillText(Math.hypot(d.latG, d.lonG).toFixed(2) + ' G', 236, 285);
