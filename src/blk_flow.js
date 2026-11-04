@@ -561,9 +561,11 @@ function updateFlow(dt, snap) {
   const F = FLOW, L = F.L;
   if (!F.ok) return;
   const prev = renderer.getRenderTarget();
-  // free stream follows the car (or the tunnel fan), kept well below the lattice speed of sound
+  // free stream follows the car (or the tunnel fan), kept well below the lattice speed of sound. Above ~200 km/h
+  // the flow pattern no longer changes with speed (it is Reynolds-number independent), and lattice Mach numbers
+  // much past 0.13 start a coherent flutter over the roof, so faster air means more steps rather than a faster lattice
   const va = airspeed();
-  F.u0 = clamp(0.075 * va / TUNNEL_V, 0.025, 0.1);
+  F.u0 = clamp(0.075 * va / TUNNEL_V, 0.025, 0.075);
   L.uni.uU0.value = F.u0; L.uni.uRoad.value = F.u0;
   flowUpdateMask(false);
   if (snap) {
@@ -755,7 +757,8 @@ function flowProbe() {
     const top = y;
     while (y > 0.6 && solid(-2.0, y, 0.5)) y -= F.DX;
     const lo = at(-2.0, y - F.DX, 0.5), hi = at(-2.0, top + 2 * F.DX, 0.5);
-    Object.assign(wing, { below: +sp(lo).toFixed(3), above: +sp(hi).toFixed(3), cpBelow: +cp(M[lo + 3]).toFixed(3), cpAbove: +cp(M[hi + 3]).toFixed(3) });
+    // (trimmed flat at V-max the wing sits close to the deck: no air cell under it to read)
+    if (M[lo + 3] > -1 && M[hi + 3] > -1) Object.assign(wing, { below: +sp(lo).toFixed(3), above: +sp(hi).toFixed(3), cpBelow: +cp(M[lo + 3]).toFixed(3), cpAbove: +cp(M[hi + 3]).toFixed(3) });
   }
   const r3 = (v) => +v.toFixed(3);
   return {
