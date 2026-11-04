@@ -73,6 +73,7 @@ npm install                                  # local three.js for dev/ pages
 node tools/interact.js dev/live.html         # clicks every control, reports console errors
 node tools/audio.js                          # renders the sound engine offline, prints levels
 node tools/selfhost_check.js                 # fails if the built page fetches anything off-site
+node tools/hdr_check.js                      # fails if over-bright highlights turn into black blocks after bloom
 ```
 
 The tools need Playwright with Chromium installed.
