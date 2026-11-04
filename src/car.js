@@ -6,6 +6,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { HorizontalBlurShader } from 'three/addons/shaders/HorizontalBlurShader.js';
 import { VerticalBlurShader } from 'three/addons/shaders/VerticalBlurShader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -132,6 +133,13 @@ function lathe(points, segs = 96, phiStart = 0, phiLen = Math.PI * 2) {
   g.rotateX(Math.PI / 2); // lathe axis (Y) -> Z
   return g;
 }
+
+// Lit materials write HDR into half-float targets, which overflow to Inf above 65504. A floodlight glinting off
+// near-mirror clearcoat or chrome can exceed that in a pixel or two; tone mapping turns Inf into NaN and bloom
+// spreads it into black blocks. Cap what any built-in material can write.
+const HDR_MAX = 256;
+THREE.ShaderChunk.opaque_fragment = THREE.ShaderChunk.opaque_fragment.replace(
+  'gl_FragColor = vec4( outgoingLight, diffuseColor.a );', `gl_FragColor = vec4( min( outgoingLight, vec3( ${HDR_MAX}.0 ) ), diffuseColor.a );`);
 
 /* =========================================================================
    Renderer, scene, camera
@@ -349,7 +357,7 @@ M.glass = new THREE.MeshPhysicalMaterial({
 });
 M.glass.onBeforeCompile = (sh) => {
   sh.fragmentShader = sh.fragmentShader.replace('#include <opaque_fragment>',
-    'gl_FragColor = vec4( totalDiffuse * diffuseColor.a + ( outgoingLight - totalDiffuse ), diffuseColor.a );');
+    `gl_FragColor = vec4( min( totalDiffuse * diffuseColor.a + ( outgoingLight - totalDiffuse ), vec3( ${HDR_MAX}.0 ) ), diffuseColor.a );`);
 };
 M.blackGloss = new THREE.MeshPhysicalMaterial({ color: 0x040405, metalness: 0.0, roughness: 0.18, clearcoat: 1, clearcoatRoughness: 0.03 });
 M.carbon = new THREE.MeshPhysicalMaterial({
@@ -2439,6 +2447,15 @@ const size0 = () => [canvas.clientWidth || window.innerWidth, canvas.clientHeigh
 const rtOpts = { type: THREE.HalfFloatType, samples: 4 };
 const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(size0()[0] * DPR, size0()[1] * DPR, rtOpts));
 composer.addPass(new RenderPass(scene, camera));
+// last line of defence before bloom: no NaN or Inf may reach the blur chain
+composer.addPass(new ShaderPass({
+  name: 'HdrSanitize',
+  uniforms: { tDiffuse: { value: null } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv;
+    float fin(float x){ return isnan(x) ? 0.0 : clamp(x, 0.0, ${HDR_MAX * 2}.0); }
+    void main(){ vec4 c = texture2D(tDiffuse, vUv); gl_FragColor = vec4(fin(c.r), fin(c.g), fin(c.b), c.a); }`,
+}));
 const bloom = new UnrealBloomPass(new THREE.Vector2(size0()[0], size0()[1]), 0.3, 0.55, 0.96);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());

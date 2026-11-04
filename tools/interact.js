@@ -33,7 +33,8 @@ const W = +(process.argv[3] || 1280), H = +(process.argv[4] || 760);
     '[data-toggle="sound"]', '[data-pose="cruise"]', '[data-pose="corner"]', '[data-toggle="aero"]', '[data-pose="brake"]',
     '[data-view="rear"]', '[data-view="wheel"]', '[data-view="cabin"]', '[data-view="driver"]',
   ];
-  for (const c of clicks) { await page.click(c, { timeout: 60000 }); await page.waitForTimeout(250); }
+  // the software renderer needs a long while for the first airflow frame (shader compiles at 1280x760)
+  for (const c of clicks) { await page.click(c, { timeout: 180000 }); await page.waitForTimeout(250); }
   await page.waitForTimeout(6000);
   const extra = await page.evaluate(() => ({ aeroKey: window.__ui.AERO.key, aeroOn: window.__ui.AERO.on, drive: { prog: window.__ui.DRIVE.prog, v: +(window.__ui.DRIVE.v * 3.6).toFixed(1), gear: window.__ui.DRIVE.gear, rpm: Math.round(window.__ui.DRIVE.rpm), engine: window.__ui.DRIVE.engine }, hud: document.body.classList.contains('hud-on'), hudSpeed: document.getElementById('hudSpeed').textContent, hudDown: document.getElementById('hudDown').textContent, fov: +window.__cam().toFixed(1) }));
   console.log('extra:', JSON.stringify(extra));

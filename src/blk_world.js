@@ -504,7 +504,7 @@ function updateLampLights() {
     const w = 1 - sstep(0, D, Math.abs(ds));
     if (!p) { l.intensity = 0; continue; }
     l.position.set(p.x, T.LAMP_H - 0.3, p.z);
-    l.intensity = 1500 * w * WORLD.mix;
+    l.intensity = 1500 * w * WORLD.mix * (WORLD.lightBoost || 1);
   }
 }
 
