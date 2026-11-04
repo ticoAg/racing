@@ -1,7 +1,10 @@
 /* =========================================================================
-   AIRFLOW — 2D potential flow (stream function) in longitudinal slices, traced
-   streamlines with time-of-flight pulses, wake turbulence, tip vortices,
-   recirculation eddies, a surface pressure map and aero loads
+   AIRFLOW — surface pressure map, force arrows and aero loads. The live view
+   comes from the 3D lattice-Boltzmann tunnel (blk_flow.js); where float
+   render targets are missing it falls back to 2D potential flow (stream
+   function) in longitudinal slices with traced streamlines, wake turbulence,
+   tip vortices and recirculation eddies, and a pressure estimate from the
+   surface orientation.
    ========================================================================= */
 const AERO = {
   on: false, fade: 0, key: '', busy: false, queued: false,
@@ -382,10 +385,17 @@ async function buildAeroViz() {
   if (AERO.busy) { AERO.queued = true; return; }
   AERO.busy = true;
   const key = aeroKey();
+  if (FLOW.pending) { AERO.busy = false; return; }
+  if (FLOW.ok) {
+    // the solver makes its own tip vortices, wake and recirculation
+    if (AERO.mesh) AERO.mesh.visible = false;
+    AERO.key = key; AERO.busy = false; AERO.queued = false; needsRender = true;
+    return;
+  }
   const F = AGRID.fine;
   const lines = [];
   const yield_ = () => new Promise((r) => (window.__TEST__ ? r() : requestAnimationFrame(() => r())));
-  for (const zq of FLOW.ok ? [] : AERO.slices) {
+  for (const zq of AERO.slices) {
     await yield_();
     const S = solveSlice(zq);
     const [A, B] = S.states;
@@ -473,13 +483,38 @@ async function buildAeroViz() {
 /* ---------- surface pressure map ---------- */
 function pressureMaterial() {
   const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.38, metalness: 0.0, envMapIntensity: 0.7, side: THREE.DoubleSide });
-  m.userData.uni = { uWingY: { value: 0 }, uWingGT: { value: 1 } };
+  m.userData.uni = {
+    uWingY: { value: 0 }, uWingGT: { value: 1 },
+    tFlowM: { value: null }, uFlowOn: { value: 0 }, uFlowG: { value: new THREE.Vector4(0, 1, 0.1, 0) }, uFlowN: { value: new THREE.Vector4(1, 1, 1, 1) }, uW2C: { value: new THREE.Matrix4() },
+  };
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, m.userData.uni);
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWN; varying vec3 vWP;')
       .replace('#include <project_vertex>', '#include <project_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWN = normalize(mat3(modelMatrix) * objectNormal);');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
 varying vec3 vWN; varying vec3 vWP; uniform float uWingY; uniform float uWingGT;
+uniform sampler2D tFlowM; uniform float uFlowOn; uniform vec4 uFlowG, uFlowN; uniform mat4 uW2C;
+// time-averaged pressure from the lattice-Boltzmann tunnel, read just off the skin: p = rho / 3 in lattice units,
+// so Cp = (p - p_inf) / (rho u0^2 / 2) = 2 (rho - 1) / (3 u0^2). Solid cells carry no pressure and are left out.
+float cpFlow(vec3 pw, vec3 nw, out float wsum) {
+  ivec4 N = ivec4(uFlowN + 0.5);
+  vec3 p = (uW2C * vec4(pw, 1.0)).xyz + normalize(mat3(uW2C) * nw) * 1.3 * uFlowG.y;
+  vec3 g = vec3((p.x - uFlowG.x) / uFlowG.y, p.y / uFlowG.y, abs(p.z) / uFlowG.y) - 0.5;
+  ivec3 i0 = ivec3(floor(g));
+  vec3 t = g - vec3(i0);
+  float rs = 0.0;
+  wsum = 0.0;
+  for (int k = 0; k < 8; k++) {
+    ivec3 o = ivec3(k & 1, (k >> 1) & 1, k >> 2), c = i0 + o;
+    if (c.z < 0) c.z = -1 - c.z;
+    if (c.x < 0 || c.y < 0 || c.x >= N.x || c.y >= N.y || c.z >= N.z) continue;
+    vec4 m = texelFetch(tFlowM, ivec2(c.x + (c.z % N.w) * N.x, c.y + (c.z / N.w) * N.y), 0);
+    vec3 b = mix(1.0 - t, t, vec3(o));
+    float w = b.x * b.y * b.z;
+    if (m.w > -1.0) { wsum += w; rs += w * m.w; }
+  }
+  return 2.0 * rs / max(wsum, 1e-5) / (3.0 * uFlowG.z * uFlowG.z);
+}
 float cpAt(vec3 n, vec3 p) {
   float c = n.x;                                   // facing the oncoming air (+x)
   float side = -0.16 - 0.5 * smoothstep(-1.8, 1.3, p.x) * (1.0 - 0.6 * smoothstep(1.6, 2.3, p.x));
@@ -502,6 +537,7 @@ vec3 turbo(float x) {
       .replace('#include <color_fragment>', `#include <color_fragment>
 vec3 wn = normalize(vWN) * (gl_FrontFacing ? 1.0 : -1.0);
 float cpv = cpAt(wn, vWP);
+if (uFlowOn > 0.0) { float ws; float cf = cpFlow(vWP, wn, ws); cpv = mix(cpv, clamp(cf, -2.2, 1.1), uFlowOn * smoothstep(0.12, 0.4, ws)); }
 float tq = (cpv + 1.6) / 2.6;
 float iso = abs(fract(cpv * 5.0 + 0.5) - 0.5) / max(fwidth(cpv * 5.0), 1e-4);
 vec3 cpCol = pow(turbo(0.04 + 0.92 * tq), vec3(2.2)) * (1.0 - 0.4 * (1.0 - smoothstep(0.0, 1.2, iso)));
@@ -598,12 +634,29 @@ function updateAeroViz(dt, t, snap = false) {
       for (const a of [AERO.arrows.front, AERO.arrows.rear, AERO.arrows.drag]) a.userData.mat.opacity = 0.95 * AERO.fade;
     }
   }
-  if (AERO.cpMat) { AERO.cpMat.userData.uni.uWingY.value = BODY.wing.position.y; AERO.cpMat.userData.uni.uWingGT.value = state.wing === 'gt' ? 1 : 0; }
+  if (AERO.cpMat) {
+    const U = AERO.cpMat.userData.uni;
+    U.uWingY.value = BODY.wing.position.y; U.uWingGT.value = state.wing === 'gt' ? 1 : 0;
+    U.uFlowOn.value = FLOW.ok && live ? FLOW.cpOn : 0;
+    if (FLOW.ok) {
+      const L = FLOW.L;
+      U.tFlowM.value = L.mrt[L.mcur].texture;
+      U.uFlowG.value.set(FLOW.X0, FLOW.DX, Math.max(FLOW.u0, 1e-3), 0);
+      U.uFlowN.value.set(L.NX, L.NY, L.NZ, L.TX);
+      car.updateMatrixWorld();
+      U.uW2C.value.copy(car.matrixWorld).invert();
+    }
+  }
   return live;
 }
 async function setAero(on) {
   AERO.on = on;
-  if (on && !FLOW.tried) flowInit();
+  if (on) {
+    syncUI();
+    FLOW.init = FLOW.init || flowInit();
+    await FLOW.init;
+    if (!AERO.on) return;   // switched off again while the solver was getting ready
+  }
   if (on && FLOW.ok) {
     flowReset();
     if (!flowSelfTest()) { FLOW.ok = false; if (FLOW.mesh) FLOW.mesh.visible = false; AERO.key = ''; }
