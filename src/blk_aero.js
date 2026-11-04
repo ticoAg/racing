@@ -11,13 +11,10 @@ const TUNNEL_V = 200 / 3.6;
 // parked with the airflow view on, the studio becomes a wind tunnel running at 200 km/h
 const airspeed = () => (AERO.on && DRIVE.prog === 'park' && DRIVE.v < 0.5 ? TUNNEL_V : DRIVE.v);
 
+// loads at airspeed v for the current wing position and airbrake (kg of downforce per axle, N of drag)
 function aeroLoads(v) {
-  const q = 0.5 * 1.225 * v * v, A = 2.05;
-  const dep = clamp(wingDeploy, 0, 1), ab = DRIVE.airbrake;
-  let clF = 0.46 + (state.kit === 'track' ? 0.18 : 0), clR = 0.38, cd = 0.33 + (state.kit === 'track' ? 0.03 : 0);
-  if (state.wing === 'gt') { clR += 0.55 + 0.38 * dep + 0.22 * ab; cd += 0.08 + 0.05 * dep + 0.32 * ab; }
-  else if (state.wing === 'active') { clR += 0.08 + 0.42 * dep + 0.16 * ab; cd += 0.01 + 0.04 * dep + 0.44 * ab; }
-  return { front: q * A * clF / GRAV, rear: q * A * clR / GRAV, drag: q * A * cd };
+  const A = aeroForces(v, clamp(wingDeploy, 0, 1), DRIVE.airbrake, {});
+  return { front: A.f / GRAV, rear: A.r / GRAV, drag: A.drag };
 }
 
 /* ---------- body silhouette per slice ---------- */
@@ -128,7 +125,7 @@ function polyDist(poly, x, y) {
   }
   return d;
 }
-function wingShapes(zq, ab, dep) {
+function wingShapes(zq, ab, dep, real = false) {
   // polygons (car frame, x-y) of the lifting elements crossing this slice, plus their wake when stalled as an airbrake
   const out = [];
   if (state.wing === 'gt' && zq <= 0.92) {
@@ -138,7 +135,7 @@ function wingShapes(zq, ab, dep) {
     const [px, py] = BODY.flapPivotPos;
     const flap = BODY.flapFoil.map(([x, y]) => [px + x * c - y * s, py + dy + x * s + y * c]);
     out.push(flap);
-    if (ab > 0.5) {
+    if (ab > 0.5 && !real) {
       let lo = flap[0], hi = flap[0];
       for (const p of flap) { if (p[1] < lo[1]) lo = p; if (p[1] > hi[1]) hi = p; }
       const xb = Math.min(lo[0], hi[0]);
@@ -150,7 +147,7 @@ function wingShapes(zq, ab, dep) {
     const c = Math.cos(-ang), s = Math.sin(-ang), oy = S.baseY + lift + (S.hAt(zq) - S.deckY);
     const poly = S.prof.map(([x, y]) => [S.xLE + x * c - y * s, oy + x * s + y * c]);
     out.push(poly);
-    if (ab > 0.5) {
+    if (ab > 0.5 && !real) {
       let lo = poly[0], hi = poly[0];
       for (const p of poly) { if (p[1] < lo[1]) lo = p; if (p[1] > hi[1]) hi = p; }
       out.push([[hi[0], hi[1]], [Math.min(lo[0], hi[0]) - 0.55, (hi[1] + lo[1]) / 2], [lo[0], lo[1] + 0.01]]);
@@ -388,7 +385,7 @@ async function buildAeroViz() {
   const F = AGRID.fine;
   const lines = [];
   const yield_ = () => new Promise((r) => (window.__TEST__ ? r() : requestAnimationFrame(() => r())));
-  for (const zq of AERO.slices) {
+  for (const zq of FLOW.ok ? [] : AERO.slices) {
     await yield_();
     const S = solveSlice(zq);
     const [A, B] = S.states;
@@ -514,7 +511,13 @@ diffuseColor.rgb = cpCol;`)
   return m;
 }
 function setPressureView(on) {
-  if (!AERO.cpMat) AERO.cpMat = pressureMaterial();
+  if (!AERO.cpMat) {
+    AERO.cpMat = pressureMaterial();
+    // the canopy keeps its transparency so the cockpit view still looks out
+    AERO.cpGlass = pressureMaterial();
+    AERO.cpGlass.userData.uni = AERO.cpMat.userData.uni;
+    Object.assign(AERO.cpGlass, { transparent: true, opacity: 0.22, depthWrite: false });
+  }
   if (on && !AERO.saved) {
     AERO.saved = [];
     const decals = new Set(DECALS.map((d) => d.mesh || d));
@@ -524,13 +527,12 @@ function setPressureView(on) {
       AERO.saved.push([o, o.material, o.visible]);
       const mats = Array.isArray(o.material) ? o.material : [o.material];
       if (decals.has(o) || mats.some((m) => m.alphaMap || (m.transparent && m !== M.glass))) { o.visible = false; return; }
-      o.material = Array.isArray(o.material) ? o.material.map(() => AERO.cpMat) : AERO.cpMat;
+      const cp = (m) => (m === M.glass ? AERO.cpGlass : AERO.cpMat);
+      o.material = Array.isArray(o.material) ? o.material.map(cp) : cp(o.material);
     });
-    if (BODY.interior) BODY.interior.visible = false;
   } else if (!on && AERO.saved) {
     for (const [o, m, vis] of AERO.saved) { o.material = m; o.visible = vis; }
     AERO.saved = null;
-    if (BODY.interior) BODY.interior.visible = true;
     applyLivery(); applyKit();
   }
 }
@@ -564,12 +566,16 @@ function poseArrow(a, base, dir, len) {
   a.visible = len > 0.02;
 }
 const _ab = new V3();
-function updateAeroViz(dt, t) {
+function updateAeroViz(dt, t, snap = false) {
   const want = AERO.on ? 1 : 0;
   AERO.fade += (want - AERO.fade) * (1 - Math.exp(-dt * 5));
   if (Math.abs(AERO.fade - want) < 0.002) AERO.fade = want;
   if (AERO.on && !AERO.busy && AERO.key !== aeroKey()) buildAeroViz();
   const live = AERO.fade > 0.001;
+  if (FLOW.ok) {
+    if (live) updateFlow(dt, snap);
+    updateFlowMesh(AERO.fade);
+  }
   if (AERO.mesh) {
     AERO.mesh.visible = live && AERO.key !== '';
     const v = airspeed(), [w, h] = size0();
@@ -597,6 +603,12 @@ function updateAeroViz(dt, t) {
 }
 async function setAero(on) {
   AERO.on = on;
+  if (on && !FLOW.tried) flowInit();
+  if (on && FLOW.ok) {
+    flowReset();
+    if (!flowSelfTest()) { FLOW.ok = false; if (FLOW.mesh) FLOW.mesh.visible = false; AERO.key = ''; }
+    else flowReset();
+  }
   setPressureView(on);
   if (on && !AERO.arrows) buildArrows();
   syncUI();

@@ -153,7 +153,7 @@ renderer.toneMappingExposure = 1.0;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.05, 220);
+const camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.05, 1600);
 camera.position.set(5.6, 1.45, 4.9);
 const controls = new OrbitControls(camera, canvas);
 controls.target.set(0.0, 0.5, 0);
@@ -1857,12 +1857,25 @@ function buildStudioEnv() {
 function buildBackdrop() {
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false,
-    uniforms: { uTop: { value: new THREE.Color(0x030304) }, uHorizon: { value: new THREE.Color(0x15171b) } },
+    uniforms: { uTop: { value: new THREE.Color(0x030304) }, uHorizon: { value: new THREE.Color(0x15171b) }, uNight: { value: 0 } },
     vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-    fragmentShader: `uniform vec3 uTop; uniform vec3 uHorizon; varying vec3 vP;
+    fragmentShader: `uniform vec3 uTop; uniform vec3 uHorizon; uniform float uNight; varying vec3 vP;
+      float h13(vec3 p){ p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
       void main(){ vec3 d = normalize(vP); float h = d.y;
         vec3 c = mix(uHorizon, uTop, smoothstep(0.0, 0.42, h));
-        gl_FragColor = vec4(c, 1.0); }`,
+        if (uNight > 0.0) {
+          // night over the circuit: deep blue zenith, a warm dome of light low over the track, stars
+          vec3 n = mix(vec3(0.034, 0.045, 0.062), vec3(0.003, 0.005, 0.011), smoothstep(-0.02, 0.45, h));
+          n += vec3(0.075, 0.05, 0.03) * exp(-max(h, 0.0) * 16.0) * 0.55;
+          vec3 q = d * 300.0, cell = floor(q);
+          float hs = h13(cell), r = length(fract(q) - 0.5);
+          n += vec3(0.85, 0.9, 1.0) * step(0.9965, hs) * (1.0 - smoothstep(0.05, 0.16, r)) * smoothstep(0.1, 0.35, h) * (0.35 + 1.3 * h13(cell + 17.0));
+          c = mix(c, n, uNight);
+        }
+        gl_FragColor = vec4(c, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
   });
   const m = new THREE.Mesh(new THREE.SphereGeometry(90, 48, 24), mat);
   m.renderOrder = -10;
@@ -1912,82 +1925,17 @@ function renderContactShadow() {
   renderer.setClearColor(0x000000, prevClear);
 }
 
-const FloorShader = {
-  name: 'StudioFloor',
-  uniforms: {
-    color: { value: null }, tDiffuse: { value: null }, textureMatrix: { value: null },
-    tShadow: { value: shadowRT.texture }, uShadowScale: { value: new THREE.Vector2(1 / SHW, 1 / SHD) },
-    uNear: { value: new THREE.Color(0x2b2d33) }, uFar: { value: new THREE.Color(0x15171b) },
-    uReflect: { value: 0.55 }, uTexel: { value: new THREE.Vector2(1 / 1024, 1 / 1024) },
-    uFlow: { value: 0 }, uOffset: { value: 0 }, uCurv: { value: 0 },
-  },
-  vertexShader: `uniform mat4 textureMatrix; varying vec4 vUv; varying vec3 vWorld;
-    #include <common>
-    #include <logdepthbuf_pars_vertex>
-    void main(){ vUv = textureMatrix * vec4(position,1.0); vec4 wp = modelMatrix * vec4(position,1.0); vWorld = wp.xyz;
-      gl_Position = projectionMatrix * viewMatrix * wp;
-      #include <logdepthbuf_vertex>
-    }`,
-  fragmentShader: `uniform vec3 color; uniform sampler2D tDiffuse; uniform sampler2D tShadow; uniform vec2 uShadowScale;
-    uniform vec3 uNear; uniform vec3 uFar; uniform float uReflect; uniform vec2 uTexel; uniform float uFlow; uniform float uOffset; uniform float uCurv;
-    varying vec4 vUv; varying vec3 vWorld;
-    #include <logdepthbuf_pars_fragment>
-    void main(){
-      #include <logdepthbuf_fragment>
-      vec2 uv = vUv.xy / vUv.w;
-      vec3 r = textureLod(tDiffuse, uv, 1.0).rgb * 0.24;
-      vec2 o = uTexel * 3.5;
-      r += textureLod(tDiffuse, uv + vec2( o.x, 0.0), 1.6).rgb * 0.095;
-      r += textureLod(tDiffuse, uv + vec2(-o.x, 0.0), 1.6).rgb * 0.095;
-      r += textureLod(tDiffuse, uv + vec2(0.0,  o.y), 1.6).rgb * 0.095;
-      r += textureLod(tDiffuse, uv + vec2(0.0, -o.y), 1.6).rgb * 0.095;
-      r += textureLod(tDiffuse, uv + vec2( o.x,  o.y) * 0.7, 1.6).rgb * 0.095;
-      r += textureLod(tDiffuse, uv + vec2(-o.x,  o.y) * 0.7, 1.6).rgb * 0.095;
-      r += textureLod(tDiffuse, uv + vec2( o.x, -o.y) * 0.7, 1.6).rgb * 0.095;
-      r += textureLod(tDiffuse, uv + vec2(-o.x, -o.y) * 0.7, 1.6).rgb * 0.095;
-      float d = length(vWorld.xz * vec2(0.105, 0.15));
-      vec3 base = mix(uNear, uFar, smoothstep(0.0, 1.0, d));
-      vec2 suv = vWorld.xz * uShadowScale + 0.5;
-      float inside = step(0.0, suv.x) * step(suv.x, 1.0) * step(0.0, suv.y) * step(suv.y, 1.0);
-      float sh = texture2D(tShadow, suv).a * inside;
-      base *= 1.0 - 0.93 * clamp(sh, 0.0, 1.0);
-      vec3 V = normalize(cameraPosition - vWorld);
-      float fres = 0.04 + 0.96 * pow(1.0 - clamp(V.y, 0.0, 1.0), 5.0);
-      float k = uReflect * mix(0.32, 1.0, fres) * (1.0 - smoothstep(0.45, 1.1, d));
-      vec3 col = base + r * k;
-      if (uFlow > 0.001) {
-        // along/across coordinates of a road that bends with curvature uCurv (centre on the +z side when positive)
-        float along = vWorld.x, across = vWorld.z;
-        if (abs(uCurv) > 1e-4) {
-          float R = 1.0 / uCurv, sR = sign(R);
-          float r = length(vec2(vWorld.x, vWorld.z - R));
-          across = R - sR * r;
-          along = atan(vWorld.x, sR * (R - vWorld.z)) * abs(R);
-        }
-        float fx = along + uOffset;
-        float azf = abs(across);
-        float bw = 0.02 + 0.10 * uFlow;
-        float ph = fract(fx / 5.0);
-        float dash = smoothstep(0.30 - bw, 0.30 + bw, ph) * (1.0 - smoothstep(0.78 - bw, 0.78 + bw, ph));
-        float lane = (1.0 - smoothstep(0.035, 0.07, abs(azf - 1.85))) * dash + (1.0 - smoothstep(0.05, 0.09, abs(azf - 4.2)));
-        float band = floor(across * 5.0);
-        float hs = fract(sin(band * 91.7 + 3.1) * 43758.5453);
-        float streak = smoothstep(0.86, 1.0, fract(fx * (0.18 + 0.2 * hs) + hs * 7.0)) * step(0.62, hs);
-        float fade = 1.0 - smoothstep(0.35, 1.05, d);
-        col += (vec3(0.075) * lane + vec3(0.028) * streak) * uFlow * fade * (1.0 - 0.85 * clamp(sh, 0.0, 1.0));
-      }
-      col = mix(col, uFar, smoothstep(0.8, 1.6, d));
-      gl_FragColor = vec4(col, 1.0);
-      #include <tonemapping_fragment>
-      #include <colorspace_fragment>
-    }`,
-};
+/*@include blk_track.js*/
+
+/*@include blk_world.js*/
 
 /* =========================================================================
    ASSEMBLY
    ========================================================================= */
 const pmrem = new THREE.PMREMGenerator(renderer);
 const envRT = pmrem.fromScene(buildStudioEnv(), 0.012);
+const envTrackRT = pmrem.fromScene(buildTrackEnv(), 0.012);
+setupEnvBlend(envRT, envTrackRT);
 scene.environment = envRT.texture;
 scene.environmentIntensity = 1.0;
 pmrem.dispose();
@@ -1996,11 +1944,14 @@ const backdrop = buildBackdrop();
 backdrop.userData.noShadow = true;
 scene.add(backdrop);
 
-const floor = new Reflector(new THREE.PlaneGeometry(60, 60), {
+const floor = new Reflector(buildGroundGeometry(), {
   shader: FloorShader, textureWidth: 1024, textureHeight: 1024, clipBias: 0.0, multisample: 4,
 });
 floor.rotation.x = -Math.PI / 2;
 floor.userData.noShadow = true;
+floor.frustumCulled = false;
+// the floor shares the world uniforms (the Reflector cloned them)
+for (const k of Object.keys(WU)) floor.material.uniforms[k] = WU[k];
 {
   const rt = floor.getRenderTarget();
   rt.texture.generateMipmaps = true;
@@ -2071,6 +2022,8 @@ const PRESETS = [
   { name: '液态银河', paint: 'glacier', finish: 'chrome', livery: 'none', wheel: 'turbine', rim: 'black', caliper: 'blue', wing: 'active', kit: 'road', cabin: 'black' },
 ];
 /*@include blk_drive.js*/
+
+/*@include blk_fx.js*/
 const CONFIG_KEYS = ['paint', 'finish', 'livery', 'wheel', 'rim', 'caliper', 'wing', 'kit', 'cabin'];
 const byId = (arr, id) => arr.find((o) => o.id === id) || arr[0];
 
@@ -2085,7 +2038,7 @@ const state = Object.assign({}, PRESETS[0], {
 });
 delete state.name;
 let paintAnim = null, camAnim = null, doorAnim = null;
-let doorOpen = 0, wingDeploy = 1, viewShift = 0, pull = 1, flowOffset = 0, shadowDirty = 0, frameNo = 0;
+let doorOpen = 0, wingDeploy = 1, viewShift = 0, pull = 1, shadowDirty = 0, frameNo = 0;
 
 /* ---------- apply configuration ---------- */
 function paintTargets() {
@@ -2291,6 +2244,8 @@ function applyViewShift() {
 
 /*@include blk_aero.js*/
 
+/*@include blk_flow.js*/
+
 /*@include blk_audio.js*/
 
 /* ---------- UI ---------- */
@@ -2441,6 +2396,7 @@ async function build() {
   buildLights(); buildIntakesAndVents();
   await step(0.74);
   buildLivery(); buildInterior(); buildSparks();
+  trackReset('park'); buildWorld(); buildFX();
   await step(0.84);
   for (const ax of AX) {
     for (const side of [-1, 1]) {
@@ -2508,7 +2464,7 @@ window.addEventListener('resize', resize);
 resize();
 
 function updateAero(dt, snap = false) {
-  const target = state.wingUp ? 1 : 0;
+  const target = state.wingUp ? 1 - DRIVE.lowDrag : 0;
   let moving = false;
   if (Math.abs(target - wingDeploy) > 1e-4) { wingDeploy += (target - wingDeploy) * (snap ? 1 : 1 - Math.exp(-dt * 3.2)); moving = true; } else wingDeploy = target;
   const ab = DRIVE.airbrake, dep = Math.max(wingDeploy, ab);
@@ -2538,9 +2494,11 @@ const clock = new THREE.Clock();
 function stepWorld(dt, snap) {
   const t = clock.elapsedTime;
   let active = updateDrive(dt, t, snap);
+  active = updateWorld(dt, snap) || active;
+  active = updateFX(dt, t, snap) || active;
   active = updateAero(dt, snap) || active;
   active = updateDoors(dt, snap) || active;
-  active = updateAeroViz(snap ? 5 : dt, t) || active;
+  active = updateAeroViz(snap ? 5 : dt, t, snap) || active;
   active = updateCockpit(t) || active;
   updateHUD(t, snap);
   const vt = viewShiftTarget();
@@ -2588,10 +2546,9 @@ function loop() {
   frameNo++;
   if (window.__ready && shadowDirty > 0 && (frameNo % 3 === 0 || shadowDirty === 1)) { renderContactShadow(); shadowDirty--; }
   if ((needsRender || active) && window.__ready) {
-    const sh = DRIVE.shake;
-    camera.position.add(sh);
+    cameraRigApply();
     composer.render();
-    camera.position.sub(sh);
+    cameraRigRestore();
     needsRender = false;
   }
   if (window.__ready) audioFrame(dt);
@@ -2607,8 +2564,8 @@ function settle() {
   car.updateMatrixWorld(true);
 }
 window.__setView = (pos, target) => { camAnim = null; camera.position.set(...pos); controls.target.set(...target); controls.minDistance = Math.min(2.2, camera.position.distanceTo(controls.target) * 0.99); controls.update(); };
-window.__renderNow = () => { settle(); controls.update(); composer.render(); };
-window.__grab = () => { settle(); controls.update(); composer.render(); return renderer.domElement.toDataURL('image/png'); };
+window.__renderNow = () => { settle(); controls.update(); cameraRigApply(); composer.render(); cameraRigRestore(); };
+window.__grab = () => { settle(); controls.update(); cameraRigApply(); composer.render(); cameraRigRestore(); return renderer.domElement.toDataURL('image/png'); };
 window.__info = () => {
   settle();
   renderer.info.autoReset = false; renderer.info.reset();
@@ -2621,19 +2578,22 @@ window.__info = () => {
   return r;
 };
 window.__cam = () => camera.fov;
-window.__ui = { setOption, applyPreset, setDoors, setWingUp, setPose, setLights, goView, setPanel, setAero, state, DRIVE, AERO };
+window.__ui = { setOption, applyPreset, setDoors, setWingUp, setPose, setLights, goView, setPanel, setAero, state, DRIVE, AERO, FX, WORLD, TRACK, FLOW };
 // offline render of the sound engine through a scripted drive, for automated level checks
 window.__audioTest = async (sec = 16, plan = [[0, 'park'], [3.5, 'brake'], [10, 'corner']]) => {
   const sr = 22050, ctx = new OfflineAudioContext(2, sr * sec, sr);
-  const S = createSound(ctx);
+  const S = await createSound(ctx);
   S.out.gain.value = 0.9;
-  Object.assign(DRIVE, { prog: 'park', v: 0, a: 0, engine: 0, start: 0, rpm: 0, gear: 1, throttle: 0, brake: 0, k: 0 });
-  const dt = 1 / 60;
+  const keep = { mix: WORLD.mix, pose: state.pose };
+  trackReset('park');
+  Object.assign(DRIVE, { prog: 'park', s: 0, n: 0, v: 0, a: 0, engine: 0, start: 0, rpm: 0, rpmT: 0, gear: 1, throttle: 0, brake: 0, k: 0, phase: '', lowDrag: 0, airbrake: 0, events: [] });
+  const dt = 1 / 60, cam = { pos: new V3(5.6, 1.45, 4.9), fwd: new V3(-5.6, -0.95, -4.9).normalize(), up: new V3(0, 1, 0), inside: false };
   for (let t = 0; t < sec; t += dt) {
     for (const [t0, p] of plan) if (t >= t0) state.pose = p;
-    driveProgram(dt); gearbox(dt);
+    WORLD.mix = DRIVE.prog === 'park' && DRIVE.engine === 0 && DRIVE.v === 0 ? 0 : 1;
+    driveProgram(dt);
     DRIVE.latG = DRIVE.v * DRIVE.v * DRIVE.k / GRAV; DRIVE.lonG = DRIVE.a / GRAV;
-    S.update(t, dt, DRIVE, 0, false);
+    S.update(t, dt, DRIVE, 0, false, cam);
     DRIVE.events.length = 0;
   }
   const buf = await ctx.startRendering();
@@ -2646,8 +2606,27 @@ window.__audioTest = async (sec = 16, plan = [[0, 'park'], [3.5, 'brake'], [10, 
       rows.push([s0, +Math.sqrt(sum / sr).toFixed(4), +pk.toFixed(3), bad]);
     }
   }
-  state.pose = 'park';
-  Object.assign(DRIVE, { prog: 'park', v: 0, a: 0, engine: 0, start: 0, rpm: 0, gear: 1, throttle: 0, brake: 0, k: 0, events: [] });
+  state.pose = keep.pose; WORLD.mix = keep.mix;
+  trackReset('park');
+  Object.assign(DRIVE, { prog: 'park', s: 0, n: 0, v: 0, a: 0, engine: 0, start: 0, rpm: 0, rpmT: 0, gear: 1, throttle: 0, brake: 0, k: 0, phase: '', lowDrag: 0, airbrake: 0, events: [] });
   return rows;
+};
+window.__engineSpectrum = async (rpm = 6000, load = 1, sec = 1.2) => {
+  const sr = 44100, ctx = new OfflineAudioContext(1, sr * sec, sr);
+  const S = await createSound(ctx);
+  S.out.gain.value = 0.9;
+  const d = Object.assign({}, DRIVE, { engine: 1, start: 0, rpm, throttle: load, v: 0, cut: 0, shiftCut: 0, events: [], kerbL: 0, kerbR: 0, abs: 0, slip: 0, airbrake: 0, latG: 0, brake: 0 });
+  const keep = WORLD.mix; WORLD.mix = 0;
+  const cam = { pos: new V3(-5, 1.2, 2), fwd: new V3(1, 0, -0.4).normalize(), up: new V3(0, 1, 0), inside: false };
+  for (let t = 0; t < sec; t += 1 / 60) S.update(t, 1 / 60, d, 0, false, cam);
+  const buf = await ctx.startRendering();
+  WORLD.mix = keep;
+  const x = buf.getChannelData(0), n0 = Math.floor(sr * 0.4), N = x.length - n0;
+  const goertzel = (f) => { const w = 2 * Math.PI * f / sr, c = 2 * Math.cos(w); let s1 = 0, s2 = 0; for (let i = 0; i < N; i++) { const s = x[n0 + i] + c * s1 - s2; s2 = s1; s1 = s; } return Math.sqrt(s1 * s1 + s2 * s2 - c * s1 * s2) / N; };
+  const f1 = rpm / 60, orders = [0.5, 1, 1.5, 3, 4.5, 6, 7.5, 9, 12, 18, 24];
+  const res = { worklet: S.worklet, rms: 0, orders: {} };
+  let sum = 0; for (let i = 0; i < N; i++) sum += x[n0 + i] * x[n0 + i]; res.rms = +Math.sqrt(sum / N).toFixed(4);
+  for (const o of orders) res.orders[o] = +(goertzel(o * f1) * 1000).toFixed(2);
+  return res;
 };
 build().catch((e) => { console.error(e); const l = document.getElementById('loader-msg'); if (l) l.textContent = '车辆构建失败：' + e.message; });

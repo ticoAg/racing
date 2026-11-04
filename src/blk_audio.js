@@ -1,8 +1,15 @@
 /* =========================================================================
-   SOUND — synthesised V12 with gearbox events, tyres, wind, brakes, and
-   showroom music for the static display (Web Audio, created on first tap)
+   SOUND — a V12 synthesised from the crank angle in an AudioWorklet: twelve
+   cylinders fire every 60° alternating banks, each combustion a pressure
+   pulse whose strength follows the load, with cylinder-to-cylinder spread,
+   ignition cuts (shifts, limiter, launch control) and afterfire, all driven
+   by the physics rpm. Exhaust and intake are placed on the car and heard from
+   the camera; the cockpit hears the engine through the bulkhead. Wind grows
+   with airspeed, tyres scrub at the limit, kerbs rumble and patches thump as
+   the wheels cross them, the barriers throw the exhaust back and masts whoosh
+   past on the circuit. Showroom music plays in the studio.
    ========================================================================= */
-const SND = { ctx: null, on: false, eng: null };
+const SND = { ctx: null, on: false, eng: null, loading: null };
 const mtof = (n) => 440 * Math.pow(2, (n - 69) / 12);
 function noiseBuffer(ctx, sec) {
   const n = Math.floor(ctx.sampleRate * sec), b = ctx.createBuffer(1, n, ctx.sampleRate), d = b.getChannelData(0);
@@ -16,37 +23,150 @@ function impulseResponse(ctx, sec, decay) {
 }
 function softClip(k) { const n = 2048, c = new Float32Array(n); for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = Math.tanh(k * x) / Math.tanh(k); } return c; }
 
-function createSound(ctx) {
+// the engine voice, run on the audio thread
+const V12_WORKLET = `
+const SEG = Math.PI / 3, CYCLE = 4 * Math.PI;
+class V12 extends AudioWorkletProcessor {
+  static get parameterDescriptors() {
+    return [
+      { name: 'rpm', defaultValue: 0, minValue: 0, maxValue: 14000, automationRate: 'k-rate' },
+      { name: 'load', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' },
+      { name: 'cut', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' },
+    ];
+  }
+  constructor() {
+    super();
+    this.ph = 0; this.next = SEG; this.cyl = 0; this.rpm = 0; this.load = 0; this.s = 918273;
+    this.b = [0, 1].map(() => ({ x: 0, y1: 0, y2: 0, hx: 0, hy: 0, burst: 0, bd: 0.997 }));
+    this.ia = { x: 0, y1: 0, y2: 0, hx: 0, hy: 0 };
+    // fixed cylinder-to-cylinder spread: the growl under the scream
+    this.spread = new Float32Array(12);
+    for (let i = 0; i < 12; i++) this.spread[i] = (this.rnd() - 0.5) * 0.16;
+    this.port.onmessage = (e) => {
+      const m = e.data;
+      if (m.type === 'pop') { const B = this.b[this.rnd() < 0.5 ? 0 : 1]; B.x += m.big ? 7 : 3; B.burst = Math.max(B.burst, m.big ? 0.75 : 0.32); B.bd = m.big ? 0.9988 : 0.9975; }
+      else if (m.type === 'crack') { for (const B of this.b) { B.x += 2.6; B.burst = Math.max(B.burst, 0.3); B.bd = 0.9965; } }
+    };
+  }
+  rnd() { this.s = (this.s * 16807) % 2147483647; return this.s / 2147483647; }
+  process(inputs, outputs, P) {
+    const oA = outputs[0][0], oB = outputs[1][0], oI = outputs[2][0];
+    if (!oA) return true;
+    const n = oA.length, sr = sampleRate;
+    const r0 = this.rpm, r1 = P.rpm[0], l0 = this.load, l1 = P.load[0], cut = P.cut[0];
+    this.rpm = r1; this.load = l1;
+    // pulse width ~14 degrees of crank: dull at idle, sharp and bright at the top
+    const rm = Math.max(60, 0.5 * (r0 + r1));
+    const tau = Math.min(0.0011, Math.max(0.00012, (14 / 360) / (rm / 60)));
+    const a = Math.exp(-1 / (tau * sr)), a2 = a * a, gk = (1 - a) * Math.E;
+    const ai = Math.exp(-1 / (tau * 3.2 * sr)), ai2 = ai * ai, gi = (1 - ai) * Math.E;
+    for (let i = 0; i < n; i++) {
+      const f = (i + 1) / n, rpm = r0 + (r1 - r0) * f, load = l0 + (l1 - l0) * f;
+      this.ph += rpm / 60 * 2 * Math.PI / sr;
+      while (this.ph >= this.next) {
+        const c = this.cyl, bank = c & 1;
+        this.cyl = (c + 1) % 12; this.next += SEG;
+        if (rpm > 50) {
+          // idle still burns fuel; above ~1600 rpm a closed throttle cuts it (overrun)
+          const burn = load < 0.04 ? (rpm < 1700 ? 0.34 : 0.16) : 0.24 + 0.76 * Math.pow(load, 0.8);
+          let amp = burn * (0.35 + 0.65 * Math.min(1.15, rpm / 9000)) * (1 + this.spread[c] + (this.rnd() - 0.5) * (0.06 + 0.3 * (1 - load)));
+          if (this.rnd() < cut) amp *= 0.06;
+          this.b[bank].x += amp;
+          this.ia.x += amp * (0.25 + 0.75 * load);
+        }
+      }
+      if (this.ph > CYCLE) { this.ph -= CYCLE; this.next -= CYCLE; }
+      const rough = 0.22 + 0.5 * load;
+      for (let k = 0; k < 2; k++) {
+        const B = this.b[k];
+        const y = 2 * a * B.y1 - a2 * B.y2 + gk * B.x;
+        B.x = 0; B.y2 = B.y1; B.y1 = y;
+        let s = y * (1 + rough * (this.rnd() * 2 - 1));
+        if (B.burst > 1e-4) { s += B.burst * (this.rnd() * 2 - 1); B.burst *= B.bd; }
+        const z = s - B.hx + 0.996 * B.hy; B.hx = s; B.hy = z;
+        (k ? oB : oA)[i] = z * 0.5;
+      }
+      const I = this.ia;
+      const yi = 2 * ai * I.y1 - ai2 * I.y2 + gi * I.x;
+      I.x = 0; I.y2 = I.y1; I.y1 = yi;
+      const si = yi + 0.05 * load * Math.min(1.2, rpm / 9000) * (this.rnd() * 2 - 1);
+      const zi = si - I.hx + 0.995 * I.hy; I.hx = si; I.hy = zi;
+      oI[i] = zi * 0.5;
+    }
+    return true;
+  }
+}
+registerProcessor('v12', V12);
+`;
+
+async function createSound(ctx) {
   const S = {};
   const gain = (v, to) => { const g = ctx.createGain(); g.gain.value = v; if (to) g.connect(to); return g; };
   const filt = (type, f, q, to) => { const b = ctx.createBiquadFilter(); b.type = type; b.frequency.value = f; if (q !== undefined) b.Q.value = q; if (to) b.connect(to); return b; };
+  const peak = (f, q, db, to) => { const b = filt('peaking', f, q, to); b.gain.value = db; return b; };
+  const panner = (x, y, z, to) => {
+    const p = ctx.createPanner();
+    p.panningModel = 'equalpower'; p.distanceModel = 'inverse'; p.refDistance = 3.5; p.rolloffFactor = 0.7; p.maxDistance = 80;
+    if (p.positionX) { p.positionX.value = x; p.positionY.value = y; p.positionZ.value = z; } else p.setPosition(x, y, z);
+    if (to) p.connect(to);
+    return p;
+  };
   const out = gain(0);
   const comp = ctx.createDynamicsCompressor();
   comp.threshold.value = -14; comp.knee.value = 10; comp.ratio.value = 3.5; comp.attack.value = 0.005; comp.release.value = 0.25;
   out.connect(comp); comp.connect(ctx.destination);
   const verb = ctx.createConvolver(); verb.buffer = impulseResponse(ctx, 2.6, 3.2);
   verb.connect(gain(0.45, out));
-  const carBus = gain(0.62, out); carBus.connect(gain(0.08, verb));
+  const carBus = gain(0.62, out);
+  const verbSend = gain(0.08, verb); carBus.connect(verbSend);
   const musicBus = gain(0, out); musicBus.connect(gain(0.32, verb));
   const noise = noiseBuffer(ctx, 3);
   const loopNoise = (to) => { const s = ctx.createBufferSource(); s.buffer = noise; s.loop = true; s.connect(to); s.start(0, Math.random() * 2.5); return s; };
 
-  // ---- engine: a V12 fires six times per crank revolution ----
-  const eng = gain(0, carBus);
-  const hp = filt('highpass', 32, 0.7, eng);
-  const form = filt('peaking', 600, 1.3, hp); form.gain.value = 5;
-  const low = filt('lowshelf', 170, undefined, form); low.gain.value = 5;
-  const lp = filt('lowpass', 900, 0.75, low);
-  const shaper = ctx.createWaveShaper(); shaper.curve = softClip(2.4); shaper.oversample = '2x'; shaper.connect(lp);
-  const drive = gain(0.6, shaper);
-  const parts = [];
-  for (const [type, g, mult, det] of [['sawtooth', 0.3, 1, 0], ['sawtooth', 0.18, 1, 9], ['square', 0.09, 0.5, 0], ['triangle', 0.15, 2, -4], ['sine', 0.32, 0.25, 0], ['sine', 0.16, 1 / 6, 0]]) {
-    const o = ctx.createOscillator(); o.type = type; o.detune.value = det; o.frequency.value = 100 * mult;
-    o.connect(gain(g, drive)); o.start(); parts.push({ o, mult });
+  // ---- engine: exhaust banks and intake, placed on the car ----
+  const exhPan = panner(XR - 0.1, 0.45, 0, carBus);
+  const intPan = panner(-0.75, 1.08, 0, carBus);
+  const exhGain = gain(0, exhPan), intGain = gain(0, intPan);
+  const exhCabin = filt('lowpass', 16000, 0.5, exhGain);
+  const exhLP = filt('lowpass', 6000, 0.6, exhCabin);
+  const shaper = ctx.createWaveShaper(); shaper.curve = softClip(2.2); shaper.oversample = '2x'; shaper.connect(exhLP);
+  const drive = gain(1, shaper);
+  const exhEq = peak(2400, 1.4, 3, drive);
+  const exhMid = peak(640, 1.1, 4, exhEq);
+  const exhHp = filt('highpass', 34, 0.7, exhMid);
+  const intLP = filt('lowpass', 3000, 0.7, intGain);
+  const intBox = filt('bandpass', 480, 0.9, intLP), intSnork = filt('bandpass', 1450, 2.2, intLP);
+  // structure-borne boom heard through the bulkhead in the cockpit
+  const rumble = gain(0, carBus);
+  const rumbleLP = filt('lowpass', 170, 0.8, rumble);
+  let node = null, fallback = null;
+  if (ctx.audioWorklet && typeof AudioWorkletNode !== 'undefined') {
+    try {
+      const url = URL.createObjectURL(new Blob([V12_WORKLET], { type: 'application/javascript' }));
+      await ctx.audioWorklet.addModule(url);
+      URL.revokeObjectURL(url);
+      node = new AudioWorkletNode(ctx, 'v12', { numberOfInputs: 0, numberOfOutputs: 3, outputChannelCount: [1, 1, 1] });
+      // two exhaust tracts of slightly different length
+      node.connect(peak(150, 1.3, 5, exhHp), 0);
+      node.connect(peak(176, 1.3, 5, exhHp), 1);
+      node.connect(intBox, 2); node.connect(intSnork, 2);
+      exhHp.connect(rumbleLP);
+    } catch (e) { node = null; }
   }
-  const roarG = gain(0, drive), roarBp = filt('bandpass', 900, 0.8, roarG); loopNoise(roarBp);
-  const lope = ctx.createOscillator(); lope.frequency.value = 20; const lopeG = gain(0, eng.gain); lope.connect(lopeG); lope.start();
-  // ---- tyres ----
+  if (!node) {
+    // older engines: additive voice at the firing frequency
+    const parts = [];
+    for (const [type, g, mult, det] of [['sawtooth', 0.3, 1, 0], ['sawtooth', 0.18, 1, 9], ['square', 0.09, 0.5, 0], ['triangle', 0.15, 2, -4], ['sine', 0.32, 0.25, 0], ['sine', 0.16, 1 / 6, 0]]) {
+      const o = ctx.createOscillator(); o.type = type; o.detune.value = det; o.frequency.value = 100 * mult;
+      o.connect(gain(g, exhHp)); o.start(); parts.push({ o, mult });
+    }
+    const roarBp = filt('bandpass', 900, 0.8, gain(0.3, exhHp)); loopNoise(roarBp);
+    fallback = { parts, roarBp };
+    exhHp.connect(rumbleLP);
+  }
+  const mechG = gain(0, intPan); loopNoise(filt('highpass', 4200, 0.8, mechG));
+
+  // ---- tyres: rolling roar, scrub at the limit, kerb ridges ----
   const rollG = gain(0, carBus), rollLp = filt('lowpass', 300, 0.6, rollG); loopNoise(rollLp);
   const sq = gain(0, carBus), sqBp = filt('bandpass', 1100, 5, sq);
   const jit = ctx.createOscillator(); jit.frequency.value = 7.3; const jitG = gain(55); jit.connect(jitG); jit.start();
@@ -56,39 +176,71 @@ function createSound(ctx) {
     jitG.connect(o.frequency); jitG2.connect(o.frequency); o.connect(gain(g, sqBp)); o.start();
   }
   loopNoise(filt('bandpass', 2300, 2.5, gain(0.4, sq)));
-  // ---- wind, tunnel fan, brakes, transmission whine ----
-  const windG = gain(0, carBus), windBp = filt('bandpass', 500, 0.5, windG); loopNoise(windBp);
+  const kerbG = gain(0, carBus), kerbLp = filt('lowpass', 420, 0.9, kerbG);
+  const kerbO = ctx.createOscillator(); kerbO.type = 'square'; kerbO.frequency.value = 40; kerbO.connect(kerbLp); kerbO.start();
+  loopNoise(filt('bandpass', 260, 1.2, gain(0.6, kerbLp)));
+  // ---- wind, buffeting, tunnel fan, brakes, transmission ----
+  const windG = gain(0, carBus), windBp = filt('bandpass', 500, 0.5, windG), windCab = filt('lowpass', 18000, 0.5, windBp); loopNoise(windCab);
   const hissG = gain(0, carBus); loopNoise(filt('highpass', 3200, 0.7, hissG));
+  const buffG = gain(0, carBus); loopNoise(filt('lowpass', 140, 0.9, buffG));
+  const buffL = ctx.createOscillator(); buffL.frequency.value = 9; const buffLG = gain(0, buffG.gain); buffL.connect(buffLG); buffL.start();
   const fanG = gain(0, carBus);
   for (const f of [47, 94.5]) { const o = ctx.createOscillator(); o.frequency.value = f; o.connect(fanG); o.start(); }
   const brkG = gain(0, carBus); loopNoise(filt('bandpass', 3800, 1.2, brkG));
   const abs = ctx.createOscillator(); abs.type = 'square'; abs.frequency.value = 16; const absG = gain(0, brkG.gain); abs.connect(absG); abs.start();
   const whine = ctx.createOscillator(); const whineG = gain(0, carBus); whine.connect(whineG); whine.start();
+  // ---- the circuit: barriers throw the exhaust back, one echo per side ----
+  const walls = [-1, 1].map((side) => {
+    const dl = ctx.createDelay(0.4); dl.delayTime.value = 0.06;
+    const g = gain(0); const lp = filt('lowpass', 2600, 0.6);
+    const sp = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+    exhCabin.connect(dl); dl.connect(lp); lp.connect(g);
+    if (sp) { sp.pan.value = side * 0.85; g.connect(sp); sp.connect(carBus); } else g.connect(carBus);
+    return { side, dl, g };
+  });
 
   // ---- one-shots ----
   const pop = (t, big) => {
+    if (node) { node.port.postMessage({ type: 'pop', big }); }
     const s = ctx.createBufferSource(); s.buffer = noise;
     const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(big ? 0.75 : 0.35, t + 0.002); g.gain.exponentialRampToValueAtTime(0.0005, t + (big ? 0.11 : 0.05));
-    s.connect(filt('bandpass', 800 + Math.random() * 1900, 1.1, g)); g.connect(carBus);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(big ? 0.5 : 0.2, t + 0.002); g.gain.exponentialRampToValueAtTime(0.0005, t + (big ? 0.1 : 0.045));
+    s.connect(filt('bandpass', 700 + Math.random() * 1700, 1.1, g)); g.connect(exhCabin);
     s.start(t, Math.random() * 2.5, 0.15);
     if (big) {
-      const o = ctx.createOscillator(); o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.1);
-      const og = ctx.createGain(); og.gain.setValueAtTime(0.55, t); og.gain.exponentialRampToValueAtTime(0.0005, t + 0.14);
-      o.connect(og); og.connect(carBus); o.start(t); o.stop(t + 0.16);
+      const o = ctx.createOscillator(); o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.1);
+      const og = ctx.createGain(); og.gain.setValueAtTime(0.5, t); og.gain.exponentialRampToValueAtTime(0.0005, t + 0.13);
+      o.connect(og); og.connect(exhCabin); o.start(t); o.stop(t + 0.15);
     }
   };
   const starter = (t) => {
     const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.setValueAtTime(130, t); o.frequency.linearRampToValueAtTime(185, t + 0.5);
     const g = ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.14, t + 0.05); g.gain.setValueAtTime(0.14, t + 0.5); g.gain.linearRampToValueAtTime(0, t + 0.6);
     const trem = ctx.createOscillator(); trem.frequency.value = 9; const tg = ctx.createGain(); tg.gain.value = 0.09; trem.connect(tg); tg.connect(g.gain);
-    o.connect(filt('lowpass', 1600, 0.7, g)); g.connect(carBus);
+    o.connect(filt('lowpass', 1600, 0.7, g)); g.connect(intPan);
     o.start(t); o.stop(t + 0.65); trem.start(t); trem.stop(t + 0.65);
   };
-  const thunk = (t) => {
-    const o = ctx.createOscillator(); o.frequency.setValueAtTime(75, t); o.frequency.exponentialRampToValueAtTime(30, t + 0.3);
-    const g = ctx.createGain(); g.gain.setValueAtTime(0.3, t); g.gain.exponentialRampToValueAtTime(0.0005, t + 0.35);
-    o.connect(g); g.connect(carBus); o.start(t); o.stop(t + 0.4);
+  const thunk = (t, f0 = 75, lvl = 0.3, to = carBus) => {
+    const o = ctx.createOscillator(); o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f0 * 0.4, t + 0.3);
+    const g = ctx.createGain(); g.gain.setValueAtTime(lvl, t); g.gain.exponentialRampToValueAtTime(0.0005, t + 0.35);
+    o.connect(g); g.connect(to); o.start(t); o.stop(t + 0.4);
+  };
+  // a wheel crossing a patch edge: a short thud with a slap of rubber
+  const bump = (t, k) => {
+    thunk(t, 62, 0.12 * k);
+    const s = ctx.createBufferSource(); s.buffer = noise;
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.06 * k, t); g.gain.exponentialRampToValueAtTime(0.0004, t + 0.05);
+    s.connect(filt('bandpass', 900, 0.9, g)); g.connect(carBus); s.start(t, Math.random() * 2.5, 0.06);
+  };
+  // a mast or gantry going past: the exhaust bounced back off it, sweeping down as it passes
+  const whoosh = (t, side, k, dur, low) => {
+    const s = ctx.createBufferSource(); s.buffer = noise;
+    const bp = filt('bandpass', low ? 900 : 1700, 0.9);
+    bp.frequency.setValueAtTime(low ? 1100 : 2300, t); bp.frequency.exponentialRampToValueAtTime(low ? 260 : 480, t + dur);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(k, t + dur * 0.45); g.gain.exponentialRampToValueAtTime(0.0002, t + dur);
+    s.connect(bp); bp.connect(g);
+    if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = side * 0.7; g.connect(p); p.connect(carBus); } else g.connect(carBus);
+    s.start(t, Math.random() * 2.5, dur + 0.05);
   };
 
   // ---- showroom music: Dmaj9 – Bm11 – Gmaj9 – A6/9sus at 96 bpm ----
@@ -157,47 +309,110 @@ function createSound(ctx) {
     }
   };
 
+  // ---- listener follows the camera ----
+  const L = ctx.listener;
+  const setListener = (t, cam) => {
+    const p = cam.pos, f = cam.fwd, u = cam.up;
+    if (L.positionX) {
+      const T = (prm, v) => prm.setTargetAtTime(v, t, 0.02);
+      T(L.positionX, p.x); T(L.positionY, p.y); T(L.positionZ, p.z);
+      T(L.forwardX, f.x); T(L.forwardY, f.y); T(L.forwardZ, f.z);
+      T(L.upX, u.x); T(L.upY, u.y); T(L.upZ, u.z);
+    } else { L.setPosition(p.x, p.y, p.z); L.setOrientation(f.x, f.y, f.z, u.x, u.y, u.z); }
+  };
+  const pass = { s: null, gant: null };
+
   S.out = out;
-  S.update = (t, dt, d, air, aeroOn) => {
+  S.worklet = !!node;
+  S.update = (t, dt, d, air, aeroOn, cam) => {
     const T = (p, v, tc = 0.03) => p.setTargetAtTime(v, t, tc);
-    const on = d.engine >= 1 ? 1 : 0;
-    const rpm = Math.max(60, d.rpm), f = rpm / 60 * 6;
-    for (const p of parts) T(p.o.frequency, f * p.mult, 0.012);
-    const thr = d.throttle, cut = d.shiftCut > 0 ? 0.25 : 1;
-    T(eng.gain, on * (0.075 + 0.17 * thr + 0.045 * rpm / 9000) * cut, 0.02);
-    T(drive.gain, 0.45 + 1.5 * thr, 0.03);
-    T(lp.frequency, Math.min(14000, 380 + f * 4.5 + 3800 * thr), 0.03);
-    T(form.frequency, Math.min(8000, f * 2.1), 0.03);
-    T(roarBp.frequency, Math.min(9000, f * 3.2), 0.03);
-    T(roarG.gain, 0.04 + 0.22 * thr, 0.04);
-    T(lope.frequency, rpm / 60 * 1.5, 0.05);
-    T(lopeG.gain, on * (rpm < 1500 ? 0.03 : 0.012), 0.1);
+    const on = d.engine >= 1 ? 1 : 0, cranking = d.engine > 0 && d.engine < 1;
+    const rpm = Math.max(0, d.rpm), thr = d.throttle;
+    const inside = cam && cam.inside ? 1 : 0;
+    if (cam) setListener(t, cam);
+    // engine: rpm and load go straight to the cylinders; ignition cuts thin the firing
+    const cutting = d.cut || d.shiftCut > 0;
+    const load = (on ? thr : 0) * (d.shiftCut > 0 ? 0.15 : 1);
+    if (node) {
+      T(node.parameters.get('rpm'), on || cranking ? rpm : 0, 0.006);
+      T(node.parameters.get('load'), cranking ? 0.35 : load, 0.012);
+      T(node.parameters.get('cut'), cutting ? (d.cut ? 0.7 : 0.92) : 0, 0.004);
+    } else {
+      const f = Math.max(60, rpm) / 60 * 6;
+      for (const p of fallback.parts) T(p.o.frequency, f * p.mult, 0.012);
+      T(fallback.roarBp.frequency, Math.min(9000, f * 3.2), 0.03);
+    }
+    const rk = Math.min(1.15, rpm / 9000);
+    T(drive.gain, 1.0 + 1.2 * load, 0.03);
+    T(exhLP.frequency, Math.min(16000, 2200 + 9500 * Math.pow(load, 1.2) + rpm * 0.45), 0.04);
+    T(exhGain.gain, (on || cranking ? 1 : 0) * (0.44 + 0.16 * load + 0.1 * rk) * (inside ? 0.62 : 1), 0.03);
+    T(intGain.gain, (on || cranking ? 1 : 0) * (0.1 + 0.32 * load) * (0.4 + 0.6 * rk) * (inside ? 2.2 : 1), 0.03);
+    T(intLP.frequency, 1600 + 4000 * load, 0.05);
+    T(mechG.gain, on * 0.012 * rk * rk * (inside ? 1.8 : 1), 0.08);
+    // the cockpit hears the exhaust through the carbon tub: dulled, with a boom
+    T(exhCabin.frequency, inside ? 1500 + 900 * load : 16000, 0.08);
+    T(rumble.gain, inside * on * (0.5 + 0.6 * load), 0.06);
+    // tyres
     const v = d.v, kmh = v * 3.6, va = Math.max(v, air);
-    T(rollLp.frequency, 160 + 9 * kmh, 0.1);
-    T(rollG.gain, 0.06 * sstep(1, 40, kmh) + 0.05 * clamp(kmh / 250, 0, 1), 0.1);
-    const slip = sstep(1.12, 1.75, Math.abs(d.latG)) * 0.9 + sstep(1.45, 1.95, -d.lonG) * 0.55 * d.brake;
-    T(sq.gain, 0.085 * slip, 0.06);
+    T(rollLp.frequency, 160 + 8 * kmh, 0.1);
+    T(rollG.gain, (0.05 * sstep(1, 40, kmh) + 0.07 * clamp(kmh / 300, 0, 1.4)) * (inside ? 0.8 : 1), 0.1);
+    const lat = Math.abs(d.latG) * GRAV / Math.max(1, latCap(v, planDep()));
+    const slip = sstep(0.82, 1.0, lat) * 0.85 + sstep(0.8, 1, d.brake) * sstep(10, 30, v) * 0.45 + sstep(0.4, 1, d.slip) * 0.9;
+    T(sq.gain, 0.08 * slip, 0.06);
     T(sqBp.frequency, 980 + 260 * slip, 0.1);
-    T(windBp.frequency, 280 + 9 * va, 0.15);
-    T(windG.gain, 0.13 * (va / 70) ** 2, 0.15);
-    T(hissG.gain, 0.03 * (va / 70) ** 2, 0.15);
+    const kerb = Math.max(d.kerbL, d.kerbR);
+    T(kerbO.frequency, Math.max(20, v / 0.75), 0.03);
+    T(kerbG.gain, 0.16 * kerb * sstep(3, 20, v), 0.02);
+    // wind: aerodynamic noise climbs steeply with speed; dull and boomy in the cockpit
+    const w2 = Math.pow(va / 70, 2.4);
+    T(windBp.frequency, 260 + 7.5 * va, 0.15);
+    T(windCab.frequency, inside ? 700 : 18000, 0.1);
+    T(windG.gain, 0.1 * w2 * (inside ? 0.75 : 1), 0.15);
+    T(hissG.gain, 0.024 * Math.pow(va / 70, 3) * (inside ? 0.25 : 1), 0.15);
+    T(buffG.gain, 0.09 * d.airbrake * sstep(20, 60, v), 0.08);
+    T(buffLG.gain, 0.05 * d.airbrake * sstep(20, 60, v), 0.08);
     T(fanG.gain, aeroOn && d.engine === 0 && d.start <= 0 ? 0.03 : 0, 0.5);
     T(brkG.gain, 0.035 * d.brake * sstep(5, 40, v), 0.05);
-    T(absG.gain, d.brake > 0.6 && v > 8 ? 0.02 : 0, 0.05);
+    T(absG.gain, d.abs ? 0.02 : 0, 0.05);
     T(whine.frequency, 40 + v * 42, 0.05);
-    T(whineG.gain, on * 0.012 * sstep(2, 25, v) * (0.4 + thr), 0.08);
-    if (on && d.overrun > 0 && d.overrun < 1.6 && Math.random() < dt * 11) pop(t + Math.random() * 0.02, Math.random() < 0.3);
+    T(whineG.gain, on * 0.012 * sstep(2, 25, v) * (0.4 + thr) * (inside ? 1.6 : 1), 0.08);
+    // the circuit: wall echoes (delay = there and back at the speed of sound), less room reverb outdoors
+    const wm = WORLD.mix;
+    for (const W of walls) {
+      const dist = Math.max(2, TRACK.WALL - W.side * d.n);
+      T(W.dl.delayTime, Math.min(0.38, 2 * dist / 343), 0.05);
+      T(W.g.gain, wm * on * 0.3 * clamp(7 / dist, 0.2, 1.2) * (inside ? 0.5 : 1), 0.1);
+    }
+    T(verbSend.gain, lerp(0.08, 0.025, wm), 0.3);
+    // masts and gantries passing the camera
+    if (wm > 0.5 && v > 8 && cam) {
+      const sCam = d.s + cam.pos.x;
+      if (pass.s !== null && sCam > pass.s) {
+        const D = TRACK.LAMP_D, j0 = Math.floor(pass.s / D), j1 = Math.floor(sCam / D);
+        if (j1 > j0 && j1 - j0 < 4) for (const side of [-1, 1]) {
+          const lat = Math.abs(side * 15 - d.n - cam.pos.z);
+          const k = Math.min(0.09, 0.05 * Math.pow(v / 60, 1.6) * clamp(9 / lat, 0.15, 1));
+          if (k > 0.004) whoosh(t + 0.005, side, k, clamp(1.6 / v * 8, 0.1, 0.4), false);
+        }
+        for (const dc of TRACK.decos) if (dc.kind === 'gantry' && dc.s > pass.s && dc.s <= sCam) whoosh(t + 0.005, 0, Math.min(0.22, 0.12 * Math.pow(v / 60, 1.5)), clamp(3 / v * 6, 0.18, 0.5), true);
+      }
+      pass.s = sCam;
+    } else pass.s = null;
+    // events from the drive model, in the order they happened
     for (const e of d.events) {
-      if (e === 'start') starter(t);
-      else if (e === 'catch') pop(t, true);
-      else if (e === 'up') pop(t + 0.01, false);
-      else if (e === 'down') { pop(t + 0.03, true); pop(t + 0.08, false); }
-      else if (e === 'stop') thunk(t);
+      const type = e.type || e;
+      if (type === 'start') starter(t);
+      else if (type === 'catch') pop(t, true);
+      else if (type === 'up') { if (node) node.port.postMessage({ type: 'crack' }); else pop(t + 0.01, false); }
+      else if (type === 'down') pop(t + 0.03, false);
+      else if (type === 'pop') pop(t + Math.random() * 0.01, e.big);
+      else if (type === 'stop') thunk(t);
+      else if (type === 'bump') bump(t + (e.axle === 'r' ? 0.002 : 0), e.k || 1);
     }
     // music belongs to the static display: it fades out while the engine runs
-    const lvl = (d.engine === 0 && d.start <= 0 ? 1 : 0) * (aeroOn ? 0.55 : 1) * 0.95;
+    const lvl = (d.engine === 0 && d.start <= 0 ? 1 : 0) * (aeroOn ? 0.55 : 1) * 0.95 * (1 - wm);
     T(musicBus.gain, lvl, lvl > 0 ? 0.8 : 0.35);
-    if (lvl > 0) { mus.quiet = 0; if (!mus.playing) { mus.playing = true; mus.step = 0; mus.next = t + 0.08; } }
+    if (lvl > 0.02) { mus.quiet = 0; if (!mus.playing) { mus.playing = true; mus.step = 0; mus.next = t + 0.08; } }
     else if (mus.playing && (mus.quiet += dt) > 3) mus.playing = false;
     if (mus.playing) {
       if (mus.next < t - 0.25) mus.next = t + 0.05;
@@ -213,17 +428,25 @@ function setSound(on) {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) { SND.on = false; syncUI(); return; }
     SND.ctx = new AC({ latencyHint: 'interactive' });
-    SND.eng = createSound(SND.ctx);
+    SND.loading = createSound(SND.ctx).then((eng) => {
+      SND.eng = eng; SND.loading = null;
+      eng.out.gain.setTargetAtTime(SND.on ? 0.9 : 0, SND.ctx.currentTime, 0.08);
+    });
   }
   if (SND.ctx) {
     if (on) SND.ctx.resume();
-    SND.eng.out.gain.setTargetAtTime(on ? 0.9 : 0, SND.ctx.currentTime, 0.08);
+    if (SND.eng) SND.eng.out.gain.setTargetAtTime(on ? 0.9 : 0, SND.ctx.currentTime, 0.08);
     if (!on) setTimeout(() => { if (!SND.on && SND.ctx) SND.ctx.suspend(); }, 450);
   }
   syncUI();
 }
+const _cam = { pos: new V3(), fwd: new V3(), up: new V3(), inside: false };
 function audioFrame(dt) {
-  if (SND.on && SND.ctx && SND.ctx.state === 'running') SND.eng.update(SND.ctx.currentTime, dt, DRIVE, airspeed(), AERO.on);
+  if (SND.on && SND.eng && SND.ctx && SND.ctx.state === 'running') {
+    _cam.pos.copy(camera.position); camera.getWorldDirection(_cam.fwd); _cam.up.copy(camera.up).applyQuaternion(camera.quaternion);
+    _cam.inside = state.view === 'driver' || (state.view === 'cabin' && camera.position.distanceTo(_cockpitC) < 1.2);
+    SND.eng.update(SND.ctx.currentTime, dt, DRIVE, airspeed(), AERO.on, _cam);
+  }
   DRIVE.events.length = 0;
 }
 document.addEventListener('visibilitychange', () => {
