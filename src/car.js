@@ -1594,8 +1594,9 @@ function buildAero() {
   BODY.flapFoil = flapFoil.map((p) => p.slice());
   BODY.flapPivotPos = [te[0] + 0.03, te[1] + 0.036];
   // end plates
+  BODY.wingPlate = [[-1.79, 1.05], [-2.20, 1.03], [-2.27, 1.10], [-2.27, 1.27], [-2.16, 1.315], [-1.88, 1.20], [-1.785, 1.11]];
   for (const side of [-1, 1]) {
-    const ep = extrudeXY([[-1.79, 1.05], [-2.20, 1.03], [-2.27, 1.10], [-2.27, 1.27], [-2.16, 1.315], [-1.88, 1.20], [-1.785, 1.11]], 0.009, side * (span / 2 + 0.0045), { bevel: 0.002 });
+    const ep = extrudeXY(BODY.wingPlate, 0.009, side * (span / 2 + 0.0045), { bevel: 0.002 });
     wing.add(new THREE.Mesh(ep, M.carbon));
   }
   // swan-neck pylons
@@ -1612,6 +1613,7 @@ function buildAero() {
     right.push([cl[i][0] + ty * w / 2, cl[i][1] - tx * w / 2]);
   }
   const pyl = left.concat(right.reverse());
+  BODY.wingPylon = pyl;
   for (const side of [-1, 1]) wing.add(new THREE.Mesh(extrudeXY(pyl, 0.016, side * 0.34, { bevel: 0.003 }), M.carbon));
   car.add(wing);
   BODY.wing = wing;
