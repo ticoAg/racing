@@ -15,7 +15,8 @@ const server = http.createServer((req, res) => {
   page.setDefaultTimeout(400000);
   page.on('pageerror', e => console.log('[pageerror]', e.message));
   page.on('console', m => { if (m.type() === 'error') console.log('[error]', m.text().slice(0, 300)); });
-  await page.goto('http://localhost:8769/dev/test.html');
+  // usage: node tools/audio.js [plan json] [car id]
+  await page.goto('http://localhost:8769/dev/test.html' + (process.argv[3] ? '?car=' + process.argv[3] : ''));
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 300000 });
   const t0 = Date.now();
   const rows = await page.evaluate((plan) => window.__audioTest(16, plan), JSON.parse(process.argv[2] || '[[0,"park"],[3.5,"brake"],[10,"corner"]]'));

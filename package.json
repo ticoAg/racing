@@ -2,12 +2,13 @@
   "name": "halcyon-h9",
   "private": true,
   "version": "1.0.0",
-  "description": "Procedural hypercar configurator in three.js: paints, wheels, aero kits, cockpit, driving dynamics, airflow visualisation and synthesised sound.",
+  "description": "Procedural car range and configurator in three.js: four models, paints, wheels, aero kits, cockpit, driving dynamics, airflow visualisation and synthesised sound.",
   "scripts": {
     "build": "python3 build.py",
     "serve": "npx --yes serve public -l 8080",
     "test:click": "node tools/interact.js dev/live.html 1280 760",
-    "test:audio": "node tools/audio.js"
+    "test:audio": "node tools/audio.js",
+    "test:drive": "node tools/drive.js"
   },
   "devDependencies": {
     "three": "0.170.0"

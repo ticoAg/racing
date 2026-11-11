@@ -6,7 +6,7 @@
    body and leans with the g-forces
    ========================================================================= */
 const FX = { flames: [], specks: null, smoke: null, vortex: null, built: false };
-const PIPES = [[XR - 0.03, 0.43, -0.155], [XR - 0.03, 0.43, 0.155]];
+
 
 /* ---------- afterfire ---------- */
 function flameMaterial() {
@@ -40,8 +40,11 @@ function flameMaterial() {
   });
 }
 function buildFlames() {
+  FX.flames = [];
+  const E = SPEC.parts.exhaust;
+  if (!E) return;
   const g = new THREE.PlaneGeometry(1, 2, 1, 1).translate(0.5, 0, 0);
-  for (const p of PIPES) {
+  for (const p of E.z.map((z) => [XR - 0.03, E.y, z])) {
     const m = new THREE.Mesh(g, flameMaterial());
     m.position.set(p[0], p[1], p[2]);
     m.frustumCulled = false; m.renderOrder = 6; m.visible = false;
@@ -172,7 +175,7 @@ function updateSmoke(dt) {
     S.acc -= 1;
     const i = S.n; S.n = (S.n + 1) % SMOKE_N;
     const side = rand() < 0.5 ? -1 : 1;
-    S.p[i * 3] = -1.32 + (rand() - 0.5) * 0.4; S.p[i * 3 + 1] = 0.12; S.p[i * 3 + 2] = side * (0.84 + 0.1 * rand());
+    S.p[i * 3] = AX[1].x + (rand() - 0.5) * 0.4; S.p[i * 3 + 1] = 0.12; S.p[i * 3 + 2] = side * (AX[1].track - 0.002 + 0.1 * rand());
     S.v[i * 3] = -d.v * (0.6 + 0.3 * rand()) - 2; S.v[i * 3 + 1] = 0.6 + 0.8 * rand(); S.v[i * 3 + 2] = side * (0.6 + rand());
     S.age[i] = 0; S.life[i] = 1.4 + 1.4 * rand();
   }
@@ -200,8 +203,9 @@ function updateSmoke(dt) {
 function buildVortexTrails() {
   // one ribbon per tip: the core of the vortex trails back, sinking and drifting inboard as it ages
   const N = 120, tips = [];
+  const [tx, ty] = BODY.wingRel([-2.24, 1.12]);
   for (const side of [-1, 1]) {
-    tips.push({ o: [-2.24, 1.12, side * 0.93], side, kind: 'wing' });
+    tips.push({ o: [tx, ty, side * (WING.span / 2 + 0.01)], side, kind: 'wing' });
   }
   const pos = [], aux = [], idx = [];
   let v = 0;
@@ -216,7 +220,7 @@ function buildVortexTrails() {
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('aAux', new THREE.Float32BufferAttribute(aux, 4));
   g.setIndex(idx);
-  FX.vortexU = { uI: { value: 0 }, uIc: { value: 0 }, uLen: { value: 8 }, uFlow: { value: 0 }, uWingY: { value: 0 }, uTime: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) } };
+  FX.vortexU = FX.vortexU || { uI: { value: 0 }, uIc: { value: 0 }, uLen: { value: 8 }, uFlow: { value: 0 }, uWingY: { value: 0 }, uTime: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) } };
   FX.vortex = new THREE.Mesh(g, new THREE.ShaderMaterial({
     uniforms: FX.vortexU, transparent: true, depthWrite: false,
     vertexShader: `uniform float uLen, uWingY, uTime, uFlow; uniform vec2 uRes;
@@ -276,8 +280,11 @@ function updateVortexTrails(dt, t) {
 }
 
 /* ---------- assembly ---------- */
-function buildFX() {
-  buildFlames(); buildSpecks(); buildSmoke(); buildVortexTrails();
+// flames and vortex trails belong to the car and are rebuilt with it; the specks and the smoke are made once
+function buildFX(first) {
+  buildFlames();
+  if (first) { buildSpecks(); buildSmoke(); }
+  buildVortexTrails();
   FX.built = true;
 }
 function updateFX(dt, t, snap = false) {
@@ -286,7 +293,7 @@ function updateFX(dt, t, snap = false) {
   // events from the drive model: afterfire on overrun, ignition cut on upshifts, blips on downshifts
   if (!snap) for (const e of d.events) {
     if (e.type === 'pop') fireFlames(e.big, e.big ? 1 : 0.8);
-    else if (e.type === 'up' && d.rpm > 6500) fireFlames(false, 0.7);
+    else if (e.type === 'up' && d.rpm > REDLINE * 6500 / 9000) fireFlames(false, 0.7);
     else if (e.type === 'down') fireFlames(rand() < 0.5, 1);
     else if (e.type === 'catch') fireFlames(true, 0.9);
   }

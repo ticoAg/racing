@@ -337,7 +337,8 @@ function voxSet(L, sol, cells, k, val) { for (let q = 0; q < cells.length; q += 
 function flowBody(L) {
   const { NX, NY, NZ, DX, X0 } = L, sol = new Uint8Array(NX * NY * NZ);
   const xs = Float64Array.from({ length: NX }, (_, i) => X0 + (i + 0.5) * DX);
-  const lip = xs.map((x) => (x > 1.84 && x < XF + 0.055 ? lipZ(Math.min(x, XF - 0.001)) : 0));
+  const noseX = XF + SPEC.parts.splitter.nose;
+  const lip = xs.map((x) => (x > SPL_X0 && x < noseX ? lipZ(Math.min(x, XF - 0.001)) : 0));
   for (let k = 0; k < NZ; k++) {
     const z = (k + 0.5) * DX;
     if (z > 1.2) break;
@@ -347,7 +348,7 @@ function flowBody(L) {
       let top = prof.T[i], bot = prof.B[i];
       // splitter under the nose: a 12 mm plate is far thinner than a cell, so its top face stands for it and the
       // slot under the nose stays as deep as the one under the floor
-      if (x > 1.84 && x < XF + 0.055 && z < lip[i] + 0.028) { bot = 0.08; if (top < 0) top = 0.08 + 0.5 * DX; }
+      if (x > SPL_X0 && x < noseX && z < lip[i] + 0.028) { bot = 0.08; if (top < 0) top = 0.08 + 0.5 * DX; }
       if (top > 0) for (let j = 0; j < NY; j++) { const y = (j + 0.5) * DX; if (y >= bot && y <= top + 0.15 * DX) sol[lbmIdx(L, i, j, k)] = 1; }
       for (const w of AX) {
         const dx = x - w.x;
@@ -367,15 +368,15 @@ function flowWing(L, dep, ab) {
   for (let k = B[4]; k <= B[5]; k++) for (let j = B[2]; j <= B[3]; j++) for (let i = B[0]; i <= B[1]; i++) { const q = lbmIdx(L, i, j, k); sol[q] = F.body[q]; }
   const layer = (z) => clamp(Math.floor(z / L.DX), 0, L.NZ - 1);
   if (state.wing === 'gt') {
-    const dy = lerp(-0.165, 0, Math.max(dep, ab));
+    const dy = lerp(-WING.drop, 0, Math.max(dep, ab));
     // the same section all along the span: rasterise once, stack it in every layer up to the tip
     const sec = wingShapes(0, ab, dep, true).map((p) => voxPoly(L, p));
-    for (let k = 0; (k + 0.5) * L.DX <= 0.92; k++) for (const c of sec) voxSet(L, sol, c, k, 1);
+    for (let k = 0; (k + 0.5) * L.DX <= WING.span / 2; k++) for (const c of sec) voxSet(L, sol, c, k, 1);
     const up = (P) => P.map(([x, y]) => [x, y + dy]);
-    voxSet(L, sol, voxPoly(L, up(BODY.wingPlate)), layer(0.9245), 1);
-    voxSet(L, sol, voxPoly(L, up(BODY.wingPylon)), layer(0.34), 1);
+    voxSet(L, sol, voxPoly(L, up(BODY.wingPlate)), layer(WING.span / 2 + 0.0045), 1);
+    voxSet(L, sol, voxPoly(L, up(BODY.wingPylon)), layer(WING.pylonZ), 1);
   } else if (state.wing === 'active') {
-    for (let k = 0; (k + 0.5) * L.DX <= 0.75; k++) for (const p of wingShapes((k + 0.5) * L.DX, ab, dep, true)) voxSet(L, sol, voxPoly(L, p), k, 1);
+    for (let k = 0; (k + 0.5) * L.DX <= SPOIL.span / 2; k++) for (const p of wingShapes((k + 0.5) * L.DX, ab, dep, true)) voxSet(L, sol, voxPoly(L, p), k, 1);
   }
   const bb = [Math.max(0, B[0] - 1), Math.min(L.NX - 1, B[1] + 1), Math.max(0, B[2] - 1), Math.min(L.NY - 1, B[3] + 1), B[4], Math.min(L.NZ - 1, B[5] + 1)];
   voxPockets(L, sol, bb);
@@ -396,6 +397,24 @@ function flowSupported() {
     return renderer.capabilities.isWebGL2 && renderer.extensions.has('EXT_color_buffer_float') && gl.getParameter(gl.MAX_DRAW_BUFFERS) >= 6 && gl.getParameter(gl.MAX_TEXTURE_SIZE) >= 2048;
   } catch (e) { return false; }
 }
+// the car in the lattice: wheels, voxels, the box the moving aero parts sweep, the smoke rakes (again after a model change)
+function flowCar() {
+  const F = FLOW, L = F.L;
+  const wh = (w) => new THREE.Vector4((w.x - F.X0) / F.DX, w.yc / F.DX, w.R / F.DX, (0.5 * (AX[0].x + AX[1].x) - F.X0) / F.DX);
+  L.uni.uWhF.value.copy(wh(AX[0])); L.uni.uWhR.value.copy(wh(AX[1]));
+  L.uni.uWhZ.value.set((AX[0].track - AX[0].w / 2) / F.DX, (AX[0].track + AX[0].w / 2) / F.DX, (AX[1].track - AX[1].w / 2) / F.DX, (AX[1].track + AX[1].w / 2) / F.DX);
+  const cell = (x, y, z) => [clamp(Math.floor((x - F.X0) / F.DX), 0, F.NX - 1), clamp(Math.floor(y / F.DX), 0, F.NY - 1), clamp(Math.floor(z / F.DX), 0, F.NZ - 1)];
+  const box = (lo, hi) => { const a = cell(...lo), b = cell(...hi); return [a[0], b[0], a[1], b[1], a[2], b[2]]; };
+  F.body = flowBody(L);
+  voxPockets(L, F.body, box([XR - 0.4, 0, 0], [XF + 0.2, 1.6, 1.25]));
+  F.sol = F.body.slice();
+  // everything the wing, its flap as an airbrake and the spoiler can reach
+  const w0 = BODY.wingRel([-2.55, 0.55]), w1 = BODY.wingRel([-1.45, 1.7]);
+  F.box = box([Math.min(w0[0], SPOIL.xLE - SPOIL.chord - 0.4), Math.min(w0[1], 0.55), 0], [Math.max(w1[0], SPOIL.xLE + 0.4), Math.max(w1[1], 1.7), Math.max(1.0, WING.span / 2 + 0.08)]);
+  lbmLinks(L, F.sol);
+  flowEmitters();
+  if (F.pMat) F.emitters.forEach((e, i) => F.pMat.uniforms.uEm.value[i].set(e.x, e.y, e.z, 0));
+}
 async function flowInit() {
   const F = FLOW;
   F.tried = true;
@@ -406,17 +425,7 @@ async function flowInit() {
   F.pending = true;
   try {
     const L = F.L = lbmCreate({ NX: F.NX, NY: F.NY, NZ: F.NZ, DX: F.DX, X0: F.X0, spO: Math.round(1.2 / F.DX), spT: Math.round(0.4 / F.DX) });
-    const wh = (w) => new THREE.Vector4((w.x - F.X0) / F.DX, w.yc / F.DX, w.R / F.DX, (0.5 * (AX[0].x + AX[1].x) - F.X0) / F.DX);
-    L.uni.uWhF.value.copy(wh(AX[0])); L.uni.uWhR.value.copy(wh(AX[1]));
-    L.uni.uWhZ.value.set((AX[0].track - AX[0].w / 2) / F.DX, (AX[0].track + AX[0].w / 2) / F.DX, (AX[1].track - AX[1].w / 2) / F.DX, (AX[1].track + AX[1].w / 2) / F.DX);
-    const cell = (x, y, z) => [clamp(Math.floor((x - F.X0) / F.DX), 0, F.NX - 1), clamp(Math.floor(y / F.DX), 0, F.NY - 1), clamp(Math.floor(z / F.DX), 0, F.NZ - 1)];
-    const box = (lo, hi) => { const a = cell(...lo), b = cell(...hi); return [a[0], b[0], a[1], b[1], a[2], b[2]]; };
-    F.body = flowBody(L);
-    voxPockets(L, F.body, box([XR - 0.4, 0, 0], [XF + 0.2, 1.6, 1.25]));
-    F.sol = F.body.slice();
-    F.box = box([-2.55, 0.55, 0], [-1.45, 1.7, 1.0]);
-    lbmLinks(L, F.sol);
-    flowEmitters();
+    flowCar();
     flowParticleSetup();
     // compile the long shaders off the main thread where the browser can (KHR_parallel_shader_compile)
     const sc = new THREE.Scene();
@@ -468,7 +477,8 @@ function flowEmitters() {
   for (const y of [0.08, 0.2, 0.34, 0.5, 0.66, 0.82, 1.0, 1.2]) add(xr, y, 0.75);
   for (const y of [0.12, 0.3, 0.5, 0.72, 0.96, 1.2]) add(xr, y, 1.1, 0.8);
   // smoke wands just ahead of the wing tips, above and below the main plane: they feed the tip vortex
-  add(-1.74, 1.21, 0.86, 1, 1); add(-1.74, 1.06, 0.86, 1, 2);
+  const wa = BODY.wingRel([-1.74, 1.21]), wb = BODY.wingRel([-1.74, 1.06]), wz = WING.span / 2 - 0.06;
+  add(wa[0], wa[1], wz, 1, 1); add(wb[0], wb[1], wz, 1, 2);
 }
 function flowParticleSetup() {
   const F = FLOW, L = F.L, NE = F.emitters.length;
@@ -535,7 +545,7 @@ function flowParticleSetup() {
 function flowParticles(stepsSince) {
   const F = FLOW, U = F.pMat.uniforms;
   // the wands follow the wing
-  const dy = state.wing === 'gt' ? lerp(-0.165, 0, Math.max(clamp(wingDeploy, 0, 1), DRIVE.airbrake)) : 0;
+  const dy = state.wing === 'gt' ? lerp(-WING.drop, 0, Math.max(clamp(wingDeploy, 0, 1), DRIVE.airbrake)) : 0;
   F.emitters.forEach((e, i) => { if (e.probe) U.uEm.value[i].y = e.y + dy; });
   F.head = (F.head + 1) % F.NP;
   U.uHead.value = F.head;
@@ -753,10 +763,11 @@ function flowProbe() {
   if (state.wing === 'gt') {
     // down from above: the wing's upper face, then through it to the air underneath; sample two cells off each face
     let y = 1.75;
-    while (y > 0.6 && !solid(-2.0, y, 0.5)) y -= F.DX;
+    const xw = BODY.wingRel([-2.0, 0])[0];
+    while (y > 0.6 && !solid(xw, y, 0.5)) y -= F.DX;
     const top = y;
-    while (y > 0.6 && solid(-2.0, y, 0.5)) y -= F.DX;
-    const lo = at(-2.0, y - F.DX, 0.5), hi = at(-2.0, top + 2 * F.DX, 0.5);
+    while (y > 0.6 && solid(xw, y, 0.5)) y -= F.DX;
+    const lo = at(xw, y - F.DX, 0.5), hi = at(xw, top + 2 * F.DX, 0.5);
     // (trimmed flat at V-max the wing sits close to the deck: no air cell under it to read)
     if (M[lo + 3] > -1 && M[hi + 3] > -1) Object.assign(wing, { below: +sp(lo).toFixed(3), above: +sp(hi).toFixed(3), cpBelow: +cp(M[lo + 3]).toFixed(3), cpAbove: +cp(M[hi + 3]).toFixed(3) });
   }
