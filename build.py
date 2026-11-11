@@ -78,7 +78,7 @@ def page(test=False):
     head, rest = body.split('<style>', 1)
     return ('<!doctype html>\n<html lang="zh-CN">\n<head>\n<meta charset="utf-8">\n'
             '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
-            '<meta name="description" content="Halcyon H9 — 原创程序化超跑配置器（three.js）">\n'
+            '<meta name="description" content="Halcyon — 原创程序化跑车系列 H9 / G8 / E4 / R10 配置器（three.js）">\n'
             '<meta name="theme-color" content="#0c0d10">\n'
             + head + '<style>' + rest.replace('</style>', '</style>\n</head>\n<body>', 1) + '\n</body>\n</html>\n')
 

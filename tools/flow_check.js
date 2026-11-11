@@ -3,7 +3,7 @@
 //     momentum exchange at its surface, against Cd 1.17 at high Reynolds numbers (Hoerner, Fluid-Dynamic Drag).
 //  2. The car in the tunnel: stagnation at the nose, faster air over the roof, the wing sucking (lower pressure
 //     underneath), reverse flow behind the tail, a calm free stream upstream, nothing blowing up.
-// usage: node tools/flow_check.js [--quick]     (--quick: coarser plate and fewer steps)
+// usage: node tools/flow_check.js [--quick] [--car=g8]     (--quick: coarser plate and fewer steps; --car: another model)
 const http = require('http'), fs = require('fs'), path = require('path');
 const { chromium } = require('playwright');
 const root = path.join(__dirname, '..');
@@ -15,6 +15,7 @@ const server = http.createServer((req, res) => {
   tryRead([path.join(root, url), path.join(root, 'public', url)]);
 });
 const quick = process.argv.includes('--quick');
+const carArg = (process.argv.find((a) => a.startsWith('--car=')) || '').slice(6);
 (async () => {
   await new Promise((r) => server.listen(8774, r));
   const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
@@ -23,7 +24,7 @@ const quick = process.argv.includes('--quick');
   page.on('pageerror', (e) => console.log('[pageerror]', e.message));
   // the car case runs on the 7 cm grid (the one phones get) to keep the software renderer's time reasonable
   await page.addInitScript(() => { window.__FLOW_GRID = { DX: 0.07, NX: 154, NY: 39, NZ: 34 }; });
-  await page.goto('http://localhost:8774/dev/test.html');
+  await page.goto('http://localhost:8774/dev/test.html' + (carArg ? '?car=' + carArg : ''));
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 300000 });
   const fails = [];
   const check = (ok, msg) => { console.log(`${ok ? 'ok  ' : 'FAIL'}  ${msg}`); if (!ok) fails.push(msg); };
@@ -45,7 +46,8 @@ const quick = process.argv.includes('--quick');
     check(car.nan === 0, `no NaN cells (${car.nan})`);
     check(car.cpNose > 0.6 && car.cpNose < 1.3, `stagnation at the nose: Cp ${car.cpNose}`);
     check(car.roof > 1.05, `air speeds up over the roof: ${car.roof} x free stream`);
-    check(car.wing.cpBelow < car.wing.cpAbove - 0.1, `wing pushes down: Cp ${car.wing.cpBelow} under it, ${car.wing.cpAbove} over it (air ${car.wing.below} / ${car.wing.above} x free stream)`);
+    // (only where the swan-neck wing is fitted: some models stand with the active spoiler)
+    if ('cpBelow' in car.wing) check(car.wing.cpBelow < car.wing.cpAbove - 0.1, `wing pushes down: Cp ${car.wing.cpBelow} under it, ${car.wing.cpAbove} over it (air ${car.wing.below} / ${car.wing.above} x free stream)`);
     check(car.wakeReverse > 50, `recirculation behind the tail: ${car.wakeReverse} cells of reverse flow`);
     check(Math.abs(car.upstream - 1) < 0.06, `free stream upstream: ${car.upstream}`);
     check(car.speedMax < 2.5, `no runaway cells: fastest air ${car.speedMax} x free stream`);

@@ -1,4 +1,4 @@
-// usage: node shot.js out_prefix [w h] -- views from VIEWS env (json) or default
+// usage: [CAR=g8] [VIEWS=front34,side] node shot.js out_prefix [w h]
 const http = require('http'), fs = require('fs'), path = require('path');
 const { chromium } = require('playwright');
 const root = path.join(__dirname, '..');
@@ -36,7 +36,7 @@ const VIEWS = {
   page.on('console', m => { const t = m.text(); if (!t.includes('GPU stall')) console.log('[console]', m.type(), t.slice(0, 400)); });
   page.on('pageerror', e => console.log('[pageerror]', e.message));
   const t0 = Date.now();
-  await page.goto('http://localhost:8765/' + (process.env.PAGE || 'dev/test.html'));
+  await page.goto('http://localhost:8765/' + (process.env.PAGE || 'dev/test.html') + (process.env.CAR ? '?car=' + process.env.CAR : ''));
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 180000 });
   console.log('ready in', Date.now() - t0, 'ms');
   await page.evaluate(() => window.__grab());

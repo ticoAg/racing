@@ -131,8 +131,8 @@ function polyDist(poly, x, y) {
 function wingShapes(zq, ab, dep, real = false) {
   // polygons (car frame, x-y) of the lifting elements crossing this slice, plus their wake when stalled as an airbrake
   const out = [];
-  if (state.wing === 'gt' && zq <= 0.92) {
-    const dy = lerp(-0.165, 0, Math.max(dep, ab));
+  if (state.wing === 'gt' && zq <= WING.span / 2) {
+    const dy = lerp(-WING.drop, 0, Math.max(dep, ab));
     out.push(BODY.wingFoil.map(([x, y]) => [x, y + dy]));
     const ang = lerp(lerp(-0.12, -0.45, Math.max(dep, ab)), -1.12, ab), c = Math.cos(ang), s = Math.sin(ang);
     const [px, py] = BODY.flapPivotPos;
@@ -144,7 +144,7 @@ function wingShapes(zq, ab, dep, real = false) {
       const xb = Math.min(lo[0], hi[0]);
       out.push([[xb, hi[1]], [xb - 0.5, (hi[1] + lo[1]) / 2 + 0.03], [xb, lo[1] + 0.02]]);
     }
-  } else if (state.wing === 'active' && zq <= 0.75) {
+  } else if (state.wing === 'active' && zq <= SPOIL.span / 2) {
     const S = BODY.spoiler, d2 = Math.max(dep, ab);
     const lift = lerp(0, 0.125, d2) + 0.02 * ab, ang = lerp(lerp(0, 0.2, d2), 0.92, ab);
     const c = Math.cos(-ang), s = Math.sin(-ang), oy = S.baseY + lift + (S.hAt(zq) - S.deckY);
@@ -174,7 +174,7 @@ function buildMask(G, prof, fineXs, zq, ab, dep) {
     const x = xs[i];
     const fi = Math.min(fineXs.length - 1, Math.round(i * step));
     let top = prof.T[fi], bot = prof.B[fi];
-    if (x > 1.84 && x < XF + 0.055 && zq < lipZ(Math.min(x, XF - 0.001)) + 0.028) { bot = 0.068; if (top < 0) top = 0.08; }
+    if (x > SPL_X0 && x < XF + SPEC.parts.splitter.nose && zq < lipZ(Math.min(x, XF - 0.001)) + 0.028) { bot = 0.068; if (top < 0) top = 0.08; }
     for (let j = 0; j < ny; j++) {
       const y = ys[j];
       let s = 0;
@@ -447,11 +447,11 @@ async function buildAeroViz() {
   const tips = [];
   const dep = state.wingUp ? 1 : 0;
   if (state.wing === 'gt') {
-    const dyA = lerp(-0.165, 0, dep);
-    tips.push({ A: [-2.24, 1.29 + dyA, 0.925], B: [-2.24, 1.29, 0.925], r: 1 });
+    const dyA = lerp(-WING.drop, 0, dep), [tx, ty] = BODY.wingRel([-2.24, 1.29]), tz = WING.span / 2 + 0.005;
+    tips.push({ A: [tx, ty + dyA, tz], B: [tx, ty, tz], r: 1 });
   } else if (state.wing === 'active') {
     const S = BODY.spoiler, yA = S.baseY + lerp(0, 0.125, dep) + 0.01, yB = S.baseY + 0.145 + 0.17;
-    tips.push({ A: [S.xLE - 0.22, yA, 0.75], B: [S.xLE - 0.12, yB, 0.75], r: 0.6 });
+    tips.push({ A: [S.xLE - 0.22, yA, SPOIL.span / 2], B: [S.xLE - 0.12, yB, SPOIL.span / 2], r: 0.6 });
   }
   for (const tip of tips) for (const side of [-1, 1]) for (let strand = 0; strand < 3; strand++) {
     const N = 220, LA = [], LB = [], wake = [];
@@ -484,7 +484,7 @@ async function buildAeroViz() {
 function pressureMaterial() {
   const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.38, metalness: 0.0, envMapIntensity: 0.7, side: THREE.DoubleSide });
   m.userData.uni = {
-    uWingY: { value: 0 }, uWingGT: { value: 1 },
+    uWingY: { value: 0 }, uWingGT: { value: 1 }, uWingBox: { value: new THREE.Vector4(-2.3, -1.76, 0.98, 1.36) }, uWingZ: { value: 0.93 },
     tFlowM: { value: null }, uFlowOn: { value: 0 }, uFlowG: { value: new THREE.Vector4(0, 1, 0.1, 0) }, uFlowN: { value: new THREE.Vector4(1, 1, 1, 1) }, uW2C: { value: new THREE.Matrix4() },
   };
   m.onBeforeCompile = (sh) => {
@@ -492,7 +492,7 @@ function pressureMaterial() {
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWN; varying vec3 vWP;')
       .replace('#include <project_vertex>', '#include <project_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWN = normalize(mat3(modelMatrix) * objectNormal);');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
-varying vec3 vWN; varying vec3 vWP; uniform float uWingY; uniform float uWingGT;
+varying vec3 vWN; varying vec3 vWP; uniform float uWingY; uniform float uWingGT; uniform vec4 uWingBox; uniform float uWingZ;
 uniform sampler2D tFlowM; uniform float uFlowOn; uniform vec4 uFlowG, uFlowN; uniform mat4 uW2C;
 // time-averaged pressure from the lattice-Boltzmann tunnel, read just off the skin: p = rho / 3 in lattice units,
 // so Cp = (p - p_inf) / (rho u0^2 / 2) = 2 (rho - 1) / (3 u0^2). Solid cells carry no pressure and are left out.
@@ -523,7 +523,7 @@ float cpAt(vec3 n, vec3 p) {
   float under = smoothstep(-0.55, -0.95, n.y) * (1.0 - smoothstep(0.09, 0.3, p.y));
   float throat = smoothstep(2.4, 1.3, p.x) * (0.7 + 0.5 * smoothstep(0.6, -1.3, p.x)) * (1.0 - smoothstep(-1.6, -2.25, p.x));
   cp = mix(cp, -0.45 - 1.05 * throat, under);
-  float wz = step(0.98 + uWingY, p.y) * step(p.y, 1.36 + uWingY) * step(p.x, -1.76) * step(-2.3, p.x) * step(abs(p.z), 0.93) * uWingGT;
+  float wz = step(uWingBox.z + uWingY, p.y) * step(p.y, uWingBox.w + uWingY) * step(p.x, uWingBox.y) * step(uWingBox.x, p.x) * step(abs(p.z), uWingZ) * uWingGT;
   cp = mix(cp, n.y < 0.0 ? -0.3 - 1.4 * (-n.y) : 0.25 + 0.5 * n.y, wz);
   return clamp(cp, -1.6, 1.0);
 }
@@ -637,6 +637,8 @@ function updateAeroViz(dt, t, snap = false) {
   if (AERO.cpMat) {
     const U = AERO.cpMat.userData.uni;
     U.uWingY.value = BODY.wing.position.y; U.uWingGT.value = state.wing === 'gt' ? 1 : 0;
+    const w0 = BODY.wingRel([-2.3, 0.98]), w1 = BODY.wingRel([-1.76, 1.36]);
+    U.uWingBox.value.set(w0[0], w1[0], w0[1], w1[1]); U.uWingZ.value = WING.span / 2 + 0.01;
     U.uFlowOn.value = FLOW.ok && live ? FLOW.cpOn : 0;
     if (FLOW.ok) {
       const L = FLOW.L;

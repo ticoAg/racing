@@ -163,6 +163,7 @@ function centreScreenTex() {
 
 /* ---------- materials ---------- */
 function cockpitMaterials() {
+  if (CAB.leather) return;   // shared by every model
   const quilt = quiltTextures();
   const grain = grainNormal();
   M.seat = new THREE.MeshPhysicalMaterial({
@@ -369,9 +370,11 @@ function buildSteeringWheel(parent) {
   rot.add(CAB.badge, new THREE.PlaneGeometry(0.06, 0.015).translate(0, -0.054, 0.0122));
   rot.build(spin);
   // live display on the wheel
-  CAB.wheelCtx = document.createElement('canvas').getContext('2d');
-  CAB.wheelCtx.canvas.width = 256; CAB.wheelCtx.canvas.height = 128;
-  CAB.wheelTex = new THREE.CanvasTexture(CAB.wheelCtx.canvas); CAB.wheelTex.colorSpace = THREE.SRGBColorSpace;
+  if (!CAB.wheelCtx) {
+    CAB.wheelCtx = document.createElement('canvas').getContext('2d');
+    CAB.wheelCtx.canvas.width = 256; CAB.wheelCtx.canvas.height = 128;
+    CAB.wheelTex = new THREE.CanvasTexture(CAB.wheelCtx.canvas); CAB.wheelTex.colorSpace = THREE.SRGBColorSpace;
+  }
   const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.074, 0.034), new THREE.MeshBasicMaterial({ map: CAB.wheelTex }));
   scr.position.set(0, 0.027, 0.0128);
   spin.add(scr);
@@ -383,15 +386,17 @@ function buildSteeringWheel(parent) {
     g.setAttribute('aLed', new THREE.Float32BufferAttribute(new Float32Array(n).fill((k + 0.5) / cols.length), 1));
     ledG.push(g);
   });
-  const ledMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
-  CAB.ledLit = { value: 0 };
-  ledMat.onBeforeCompile = (sh) => {
-    sh.uniforms.uLit = CAB.ledLit;
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float aLed;\nvarying float vLed;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvLed = aLed;');
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uLit;\nvarying float vLed;')
-      .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= vLed < uLit ? 2.2 : 0.07;');
-  };
-  spin.add(new THREE.Mesh(mergeGeometries(ledG), ledMat));
+  if (!CAB.ledMat) {
+    CAB.ledMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
+    CAB.ledLit = { value: 0 };
+    CAB.ledMat.onBeforeCompile = (sh) => {
+      sh.uniforms.uLit = CAB.ledLit;
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float aLed;\nvarying float vLed;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvLed = aLed;');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uLit;\nvarying float vLed;')
+        .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= vLed < uLit ? 2.2 : 0.07;');
+    };
+  }
+  spin.add(new THREE.Mesh(mergeGeometries(ledG), CAB.ledMat));
   // column, shroud and column-mounted paddles (they do not turn with the wheel)
   fixed.add(CAB.dark, new THREE.CylinderGeometry(0.026, 0.03, 0.29, 24).rotateX(Math.PI / 2).translate(0, -0.006, -0.19));
   fixed.add(CAB.carbon, new RoundedBoxGeometry(0.11, 0.075, 0.13, 3, 0.025).translate(0, -0.012, -0.2));
@@ -413,21 +418,23 @@ function drawCluster() {
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
   const red = '#ff2a3c', amber = '#ffb020', ink = '#eef2f7', dim = 'rgba(238,242,247,0.1)';
   const segs = 46;
+  // rev band up to the model's scale: amber from 7/9 of the way to the red zone, labels in thousands
+  const top = PWR.cluster, amberAt = REDZONE * 7000 / 8200, kStep = top > 12000 ? 2000 : 1000;
   for (let i = 0; i < segs; i++) {
-    const f = i / (segs - 1), r = f * 9000, lit = d.engine > 0 && r <= rpm;
+    const f = i / (segs - 1), r = f * top, lit = d.engine > 0 && r <= rpm;
     const x = 132 + f * 760, y = 66 - Math.sin(f * Math.PI) * 24;
-    ctx.fillStyle = lit ? (r >= 8200 ? red : r >= 7000 ? amber : ink) : (r >= 8200 ? 'rgba(255,42,60,0.22)' : dim);
+    ctx.fillStyle = lit ? (r >= REDZONE ? red : r >= amberAt ? amber : ink) : (r >= REDZONE ? 'rgba(255,42,60,0.22)' : dim);
     ctx.fillRect(x - 6, y - 15, 11, 30);
   }
   ctx.fillStyle = '#7f8b99'; setFont(ctx, 600, 18, 'normal'); ctx.textAlign = 'center';
-  for (let k = 1; k <= 9; k++) { const f = k / 9; ctx.fillText(String(k), 132 + f * 760, 118 - Math.sin(f * Math.PI) * 24); }
+  for (let k = kStep; k <= top; k += kStep) { const f = k / top; ctx.fillText(String(k / 1000), 132 + f * 760, 118 - Math.sin(f * Math.PI) * 24); }
   ctx.fillStyle = ink; setFont(ctx, 800, 150, 'normal', 'italic'); ctx.fillText(String(kmh), 512, 262);
   ctx.fillStyle = '#7f8b99'; setFont(ctx, 600, 22, 'expanded'); ctx.fillText('KM/H', 512, 298);
   // gear
   ctx.strokeStyle = 'rgba(238,242,247,0.35)'; ctx.lineWidth = 3;
   roundRectPath(800, 150, 120, 130, 20)(ctx); ctx.stroke();
   ctx.fillStyle = d.shiftFlash > 0 ? amber : ink; setFont(ctx, 800, 104, 'normal');
-  ctx.fillText(d.engine > 0 ? (d.v < 0.5 && d.throttle < 0.05 ? 'N' : String(d.gear)) : '–', 860, 252);
+  ctx.fillText(gearLabel(), 860, 252);
   // g-ball
   ctx.strokeStyle = 'rgba(238,242,247,0.22)'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.arc(160, 215, 62, 0, Math.PI * 2); ctx.stroke();
@@ -437,13 +444,13 @@ function drawCluster() {
   ctx.fillStyle = red; ctx.beginPath(); ctx.arc(160 + gx, 215 + gy, 9, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#7f8b99'; setFont(ctx, 600, 18, 'normal'); ctx.textAlign = 'left';
   ctx.fillText(Math.hypot(d.latG, d.lonG).toFixed(2) + ' G', 236, 285);
-  ctx.textAlign = 'right'; ctx.fillText('OIL 98°  H2O 91°', 990, 118);
+  ctx.textAlign = 'right'; ctx.fillText(PWR.temps, 990, 118);
   CAB.clusterTex.needsUpdate = true;
   // wheel display
   const w = CAB.wheelCtx;
   w.fillStyle = '#020305'; w.fillRect(0, 0, 256, 128);
   w.fillStyle = ink; setFont(w, 800, 82, 'normal'); w.textAlign = 'center';
-  w.fillText(d.engine > 0 ? (d.v < 0.5 && d.throttle < 0.05 ? 'N' : String(d.gear)) : '–', 128, 96);
+  w.fillText(gearLabel(), 128, 96);
   w.fillStyle = '#7f8b99'; setFont(w, 600, 22, 'normal');
   w.textAlign = 'left'; w.fillText(String(kmh), 14, 30);
   w.textAlign = 'right'; w.fillText(String(Math.round(rpm / 100) * 100), 242, 30);
@@ -519,10 +526,12 @@ function buildInterior() {
     };
     const patch = (nu, nv, fn) => { const rows = []; for (let i = 0; i <= nu; i++) { const row = []; for (let j = 0; j <= nv; j++) row.push(fn(i / nu, j / nv).toArray()); rows.push(row); } return rows; };
     const scrGeo = gridGeometry(patch(40, 4, (u, v) => sp(u, v)), { uFn: (i) => i / 40, vFn: (i, j) => j / 4 });
-    CAB.clusterCtx = document.createElement('canvas').getContext('2d');
-    CAB.clusterCtx.canvas.width = 1024; CAB.clusterCtx.canvas.height = 320;
-    CAB.clusterTex = new THREE.CanvasTexture(CAB.clusterCtx.canvas);
-    CAB.clusterTex.colorSpace = THREE.SRGBColorSpace; CAB.clusterTex.anisotropy = 8;
+    if (!CAB.clusterCtx) {
+      CAB.clusterCtx = document.createElement('canvas').getContext('2d');
+      CAB.clusterCtx.canvas.width = 1024; CAB.clusterCtx.canvas.height = 320;
+      CAB.clusterTex = new THREE.CanvasTexture(CAB.clusterCtx.canvas);
+      CAB.clusterTex.colorSpace = THREE.SRGBColorSpace; CAB.clusterTex.anisotropy = 8;
+    }
     const scr = new THREE.Mesh(scrGeo, new THREE.MeshBasicMaterial({ map: CAB.clusterTex, side: THREE.DoubleSide }));
     interior.add(scr);
     B.add(CAB.dark, gridGeometry(patch(40, 4, (u, v) => sp(u, v, 0.016, 0.003))));
@@ -541,7 +550,7 @@ function buildInterior() {
     const mid = A.clone().add(Bq).multiplyScalar(0.5);
     const m = basisAt(mid.clone().addScaledVector(n, 0.0115), new V3(0, 0, 1), t.clone().negate(), n);
     B.add(CAB.dark, new RoundedBoxGeometry(0.124, 0.104, 0.004, 2, 0.003), m);
-    const cs = new THREE.Mesh(new THREE.PlaneGeometry(0.114, 0.094), new THREE.MeshBasicMaterial({ map: centreScreenTex() }));
+    const cs = new THREE.Mesh(new THREE.PlaneGeometry(0.114, 0.094), new THREE.MeshBasicMaterial({ map: texOnce('centre-screen', centreScreenTex) }));
     cs.matrixAutoUpdate = false;
     cs.matrix.copy(basisAt(mid.clone().addScaledVector(n, 0.0139), new V3(0, 0, 1), t.clone().negate(), n));
     interior.add(cs);
@@ -636,7 +645,7 @@ function buildInterior() {
 function updateCockpit(t) {
   if (!CAB.spin) return false;
   CAB.spin.rotation.z = DRIVE.steer * 9.5;
-  const lit = DRIVE.engine > 0 ? clamp((DRIVE.rpm - 4500) / 4300, 0, 1.0001) : 0;
+  const lit = DRIVE.engine > 0 ? clamp((DRIVE.rpm - 0.5 * REDLINE) / (UPSHIFT - 80 - 0.5 * REDLINE), 0, 1.0001) : 0;
   CAB.ledLit.value = lit > 0.98 ? ((t * 8) % 1 < 0.5 ? 1.01 : 0) : lit;
   const near = state.view === 'cabin' || state.view === 'driver' || camera.position.distanceTo(_cockpitC) < 4.2;
   if (!near || t - CAB.lastDraw < 0.12) return false;

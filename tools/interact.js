@@ -53,6 +53,17 @@ const W = +(process.argv[3] || 1280), H = +(process.argv[4] || 760);
     };
   });
   console.log('final:', JSON.stringify(st));
+  // every model in turn: built in place, launched, parked again (airflow off: under the software renderer its
+  // frames are too slow for the car to get going)
+  await page.click('[data-toggle="aero"]'); await page.waitForTimeout(500);
+  for (const id of ['g8', 'e4', 'r10', 'h9']) {
+    await page.click(`[data-model="${id}"]`, { timeout: 60000 });
+    await page.waitForFunction((m) => window.__ui.SPEC.id === m && !document.body.classList.contains('is-switching'), id, { timeout: 240000 });
+    await page.click('[data-pose="cruise"]'); await page.waitForTimeout(7000);
+    const m = await page.evaluate(() => { const u = window.__ui, d = u.DRIVE; return { model: u.state.model, title: document.title, checked: document.querySelector('[data-model][aria-checked="true"]')?.dataset.model, presets: document.querySelectorAll('[data-preset]').length, preset: u.state.preset, v: +(d.v * 3.6).toFixed(0), gear: d.gear, rpm: Math.round(d.rpm), engine: d.engine }; });
+    console.log('model:', JSON.stringify(m));
+    await page.click('[data-pose="park"]'); await page.waitForTimeout(600);
+  }
   console.log(errs.filter(e => !e.includes('UniformsUtils') && !e.includes('GPU stall') && !e.includes('GL Driver')).join('\n') || 'no errors');
   await page.click('[data-toggle="turntable"]'); await page.waitForTimeout(3000);
   try { await page.screenshot({ path: 'out/interact_' + path.basename(process.argv[2], '.html') + '.png', timeout: 120000 }); console.log('screenshot saved'); } catch (e) { console.log('screenshot skipped'); }
