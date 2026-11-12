@@ -138,6 +138,8 @@ body.panel-open { --panel-space: calc(var(--panel-w) + var(--gutter-r) + 8px); }
 }
 .seg:hover { color: var(--ink); }
 .seg[aria-checked="true"], .seg[aria-current="true"] { color: var(--ink); background: var(--wash-strong); }
+.seg[aria-pressed="true"] { color: var(--ink); background: var(--wash-strong); }
+.group[hidden] { display: none; }
 .poses .seg[aria-checked="true"] { box-shadow: inset 0 -2px 0 var(--livery-red); }
 
 .tog[data-toggle="sound"] .snd-off { display: none; }
@@ -440,6 +442,7 @@ body.is-ready .rail { opacity: 1; transform: translate(-50%, 0); }
     <button class="seg" type="button" role="radio" data-pose="corner">过弯</button>
     <button class="seg" type="button" role="radio" data-pose="brake">制动</button>
   </div>
+  <div class="group mods" id="mods" role="group" aria-label="系统" hidden></div>
   <span class="sep" aria-hidden="true"></span>
   <div class="group views" aria-label="视角">
     <button class="seg" type="button" data-view="front">前视</button>

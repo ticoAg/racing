@@ -176,7 +176,7 @@ const carRoot = new THREE.Group();
 scene.add(carRoot);
 const car = new THREE.Group(); // sprung body: poses tilt and lower this group
 carRoot.add(car);
-// names a part of the car for the exploded view (blk_explode.js): everything with one name and side moves as one piece
+// names a part of the car for the parts store (blk_explode.js): everything with one name and side is one part
 const part = (o, name, side = 0) => { o.userData.part = name; o.userData.side = side; return o; };
 
 /* =========================================================================
@@ -940,7 +940,7 @@ function buildDoors() {
     if (BODY.doorGlass && BODY.doorGlass[side]) pane.add(BODY.doorGlass[side]);
     content.add(outer, inner, pane);
     pivot.add(content);
-    car.add(part(pivot, 'door', side));
+    car.add(pivot);
     const axis = new V3(HINGE.ax[0], HINGE.ax[1], HINGE.ax[2] * side).normalize();
     DOORS[side] = { pivot, content, skin, card, outer, inner, pane, axis, angle: HINGE.angle * side };
   }
@@ -1543,9 +1543,9 @@ function buildAero() {
       g.rotateX(-Math.PI / 2);
       if (side < 0) g.scale(1, 1, -1);
       const m = new THREE.Mesh(g, M.carbon);
-      m.position.y = cy0;
+      // tilted nose-down about its own middle (the plan above lies at height 0 around x = cx0)
       m.rotation.z = -0.16;
-      m.position.x = cx0 * (1 - Math.cos(0.16)) - cy0 * Math.sin(0.16) * 0.0;
+      m.position.set(cx0 * (1 - Math.cos(0.16)), cy0 + cx0 * Math.sin(0.16), 0);
       car.add(part(m, 'canard', side));
       BODY.track.push(m);
     }
@@ -1650,7 +1650,7 @@ function buildAero() {
     pylons[side].add(new THREE.Mesh(extrudeXY(pyl, 0.016, side * WING.pylonZ, { bevel: 0.003 }), M.carbon));
     wing.add(pylons[side]);
   }
-  car.add(part(wing, 'wing'));
+  car.add(wing);
   BODY.wing = wing;
   BODY.wingSub = { plane, flap: flapMount, plates, pylons };
   BODY.wingRel = rel;
@@ -2059,7 +2059,7 @@ const vBlur = new THREE.ShaderMaterial(VerticalBlurShader); vBlur.depthTest = fa
 const blurQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), hBlur);
 blurScene.add(blurQuad);
 
-// the patch of floor the shadow covers, as a multiple of the car's own footprint (the exploded car needs more)
+// the patch of floor the shadow covers, as a multiple of the car's own footprint (parts laid out around it need more)
 let SHK = 1;
 function shadowScale(k) {
   if (k === SHK) return;
@@ -2196,12 +2196,12 @@ const wideScreen = () => window.innerWidth >= 900;
 const SHEET_MQ = window.matchMedia('(max-width: 899px) and (max-aspect-ratio: 5/4), (max-width: 639px)');
 const sheetLayout = () => SHEET_MQ.matches;
 const state = Object.assign({}, PRESETS[0], {
-  model: START_MODEL.id, preset: 0, doors: false, wingUp: true, lights: true, explode: false, pose: 'park', view: 'front', tab: 'style',
+  model: START_MODEL.id, preset: 0, doors: false, wingUp: true, lights: true, explode: false, apart: {}, pose: 'park', view: 'front', tab: 'style',
   turntable: !reduceMotion && !window.__TEST__, panel: !window.__TEST__ && wideScreen(),
 });
 delete state.name;
 let paintAnim = null, camAnim = null, doorAnim = null;
-let doorOpen = 0, wingDeploy = 1, viewShift = 0, pull = 1, lift = 0, shadowDirty = 0, frameNo = 0;
+let doorOpen = 0, wingDeploy = 1, viewShift = 0, pull = 1, shadowDirty = 0, frameNo = 0;
 
 /* ---------- apply configuration ---------- */
 function paintTargets() {
@@ -2260,6 +2260,7 @@ function applyKit() {
   BODY.wing.visible = state.wing === 'gt';
   BODY.spoiler.group.visible = state.wing === 'active';
   BODY.spoiler.struts.forEach((s) => (s.visible = state.wing === 'active'));
+  xplRefit();
   shadowDirty = 2; needsRender = true;
 }
 function applyCabin() {
@@ -2344,7 +2345,7 @@ function applyFov() {
 function viewLimits(name) {
   const inside = name === 'driver';
   controls.minDistance = inside ? 0.02 : 2.2;
-  controls.maxDistance = inside ? 0.12 : 18;
+  controls.maxDistance = inside ? 0.12 : XPL.live ? 80 : 18;
   controls.enableZoom = !inside; controls.enablePan = !inside;
   controls.maxPolarAngle = inside ? Math.PI * 0.72 : Math.PI * 0.492;
   controls.rotateSpeed = inside ? 0.45 : 1;
@@ -2368,16 +2369,18 @@ function panelPull() {
 let VIEW_DX = 0;
 const OUTSIDE = { front: 1, side: 1, rear: 1, top: 1 };
 function viewTarget(name) {
+  const store = xplView(name);
+  if (store) return store;
   const [p, t] = VIEWS[name];
   const k = name === 'driver' ? 1 : (name === 'wheel' || name === 'cabin' ? 1 : framing()) * pull;
   const tv = new V3(...t), pv = new V3(...p).sub(tv).multiplyScalar(k).add(tv);
-  if (OUTSIDE[name]) { tv.x += VIEW_DX; pv.x += VIEW_DX; tv.y += lift; pv.y += lift; }
+  if (OUTSIDE[name]) { tv.x += VIEW_DX; pv.x += VIEW_DX; }
   return { p: pv, t: tv };
 }
 function goView(name, dur = 1.25) {
   const from = state.view;
   state.view = name;
-  if (name === 'cabin' && !state.doors) setDoors(true);
+  if (name === 'cabin' && !state.doors && !(state.explode && state.apart.doors)) setDoors(true);
   if (name === 'driver' && state.turntable) setTurntable(false);
   if (name === 'driver') state.explode = false;
   const { p, t } = viewTarget(name);
@@ -2387,8 +2390,8 @@ function goView(name, dur = 1.25) {
     camera.position.copy(p); controls.target.copy(t); camera.fov = fov1; camera.updateProjectionMatrix();
     controls.update(); needsRender = true; syncUI(); return;
   }
-  // free limits while flying between the outside and the driver's seat
-  controls.minDistance = 0.02; controls.maxDistance = 18;
+  // free limits while flying between the outside and the driver's seat, or up over the parts store
+  controls.minDistance = 0.02; controls.maxDistance = 80;
   const s0 = new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target));
   const s1 = new THREE.Spherical().setFromVector3(p.clone().sub(t));
   let dth = s1.theta - s0.theta;
@@ -2589,6 +2592,7 @@ function buildUI() {
   $('#wings').innerHTML = WINGS.map((w) => radio('wing', w, 'chip', `<span>${w.name}</span>`)).join('');
   $('#kits').innerHTML = KITS.map((k) => radio('kit', k, 'chip', `<span>${k.name}</span>`)).join('');
   $('#liveries').innerHTML = LIVERIES.map((l) => radio('livery', l, 'chip tile', `${liveryIcon(l.id)}<span>${l.name}</span>`)).join('');
+  $('#mods').innerHTML = XPL_MODS.map((m) => `<button type="button" class="seg" data-mod="${m.id}" aria-pressed="false">${m.name}</button>`).join('');
   $('#cabins').innerHTML = CABINS.map((c) => radio('cabin', c, 'chip', `<span class="duo" style="background:linear-gradient(135deg, ${c.seat} 0 56%, ${c.accent} 56% 100%)"></span><span>${c.name}</span>`)).join('');
 
   const panel = panelEl();
@@ -2625,6 +2629,11 @@ function buildUI() {
     syncUI();
   }));
   $$('[data-pose]').forEach((b) => b.addEventListener('click', () => { if (switching) return; setPose(b.dataset.pose); syncUI(); }));
+  // a system's button fits it to the car or takes it off; pointing at it shows its bay
+  $$('[data-mod]').forEach((b) => {
+    b.addEventListener('click', () => { if (!switching) setModule(b.dataset.mod, !state.apart[b.dataset.mod]); });
+    for (const [ev, id] of [['pointerenter', b.dataset.mod], ['focus', b.dataset.mod], ['pointerleave', ''], ['blur', '']]) b.addEventListener(ev, () => { XPL.hover = id; needsRender = true; });
+  });
   $$('[data-view]').forEach((b) => b.addEventListener('click', () => { if (switching) return; setTurntable(false); goView(b.dataset.view); }));
   syncUI();
 }
@@ -2636,9 +2645,14 @@ function syncUI() {
   $$('[data-pane]').forEach((p) => (p.hidden = p.dataset.pane !== state.tab));
   const pressed = { doors: state.doors, wing: state.wingUp && state.wing !== 'none', lights: state.lights, explode: state.explode, turntable: state.turntable, panel: state.panel, aero: AERO.on, sound: SND.on };
   $$('[data-toggle]').forEach((b) => b.setAttribute('aria-pressed', String(!!pressed[b.dataset.toggle])));
-  // the same button takes the car apart and puts it back together
+  // the same button lays the whole car out and puts it back together
   const xb = $('[data-toggle="explode"]'); if (xb) { const t = xb.dataset[state.explode ? 'on' : 'off']; xb.title = t; xb.setAttribute('aria-label', t); }
-  const wb = $('[data-toggle="wing"]'); if (wb) wb.disabled = state.wing === 'none';
+  // (what lies in its bay cannot be worked)
+  const wb = $('[data-toggle="wing"]'); if (wb) wb.disabled = state.wing === 'none' || (state.explode && state.apart.aero);
+  const db = $('[data-toggle="doors"]'); if (db) db.disabled = state.explode && state.apart.doors;
+  // while the parts store is open the systems take the place of the driving programs
+  const pg = $('.poses'), mg = $('.mods'); if (pg && mg) { pg.hidden = state.explode; mg.hidden = !state.explode; }
+  $$('[data-mod]').forEach((b) => b.setAttribute('aria-pressed', String(!state.apart[b.dataset.mod])));
   $$('[data-pose]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.pose === state.pose)));
   $$('[data-view]').forEach((b) => b.setAttribute('aria-current', String(b.dataset.view === state.view)));
   document.body.classList.toggle('panel-open', state.panel);
@@ -2839,7 +2853,7 @@ function stepWorld(dt, snap) {
   const vt = viewShiftTarget();
   if (Math.abs(vt - viewShift) > 0.5) { viewShift = snap ? vt : viewShift + (vt - viewShift) * (1 - Math.exp(-dt * 7)); applyViewShift(); active = true; }
   else if (viewShift !== vt) { viewShift = vt; applyViewShift(); active = true; }
-  const pt = panelPull() * xplPull();
+  const pt = panelPull();
   if (pt !== pull) {
     let np = snap ? pt : pull + (pt - pull) * (1 - Math.exp(-dt * 7));
     if (Math.abs(pt - np) < 1e-3) np = pt;
@@ -2847,15 +2861,6 @@ function stepWorld(dt, snap) {
     camera.position.sub(controls.target).multiplyScalar(r).add(controls.target);
     if (camAnim) { camAnim.s0.radius *= r; camAnim.s1.radius *= r; }
     pull = np; active = true;
-  }
-  // the exploded car stands taller: the camera and what it looks at rise with it
-  const lt = xplLift();
-  if (lt !== lift) {
-    let nl = snap ? lt : lift + (lt - lift) * (1 - Math.exp(-dt * 7));
-    if (Math.abs(lt - nl) < 1e-3) nl = lt;
-    camera.position.y += nl - lift; controls.target.y += nl - lift;
-    if (camAnim) { camAnim.t0.y += nl - lift; camAnim.t1.y += nl - lift; }
-    lift = nl; active = true;
   }
   return active;
 }
@@ -2923,7 +2928,7 @@ window.__info = () => {
   return r;
 };
 window.__cam = () => camera.fov;
-window.__ui = { setOption, applyPreset, setDoors, setWingUp, setPose, setLights, setExplode, goView, setPanel, setAero, setModel, state, DRIVE, AERO, FX, WORLD, TRACK, FLOW, XPL, BODY, MODELS, get SPEC() { return SPEC; } };
+window.__ui = { setOption, applyPreset, setDoors, setWingUp, setPose, setLights, setExplode, setModule, goView, setPanel, setAero, setModel, state, DRIVE, AERO, FX, WORLD, TRACK, FLOW, XPL, BODY, MODELS, get SPEC() { return SPEC; } };
 // offline render of the sound engine through a scripted drive, for automated level checks
 window.__audioTest = async (sec = 16, plan = [[0, 'park'], [3.5, 'brake'], [10, 'corner']]) => {
   const sr = 22050, ctx = new OfflineAudioContext(2, sr * sec, sr);

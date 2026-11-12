@@ -1,89 +1,91 @@
 /* =========================================================================
-   EXPLODED VIEW — the parked car comes apart into its pieces and goes back
-   together. Every builder names its parts (part()); here each name gets a
-   place to go and a moment to leave. The skin is one lofted mesh, so the
-   first time it is needed it is cut along the shut lines the paint already
-   shows (bonnet, engine cover, the four fenders, the tub in between), with
-   whatever is laid onto it (lights, vents, lettering) cut the same way.
-   Surfaces that are only ever seen from one side get an inner face while the
-   car is apart.
+   PARTS STORE — the parked car is taken apart and its parts are set out on
+   the studio floor around the bare tub, sorted by system: body, doors,
+   canopy, aero, cabin, wheels, tail. Every system has a bay; each goes back
+   onto the car on its own, or all of them at once.
+   Every builder names its parts (part()); here each name belongs to a system
+   and has a place in that system's bay. The bays are packed from the parts'
+   own sizes, so they suit every model and configuration. The skin is one
+   lofted mesh: the first time it is needed it is cut along the shut lines the
+   paint already shows (bonnet, engine cover, the four fenders, the tub in
+   between), with whatever is laid onto it (lights, vents, lettering) cut the
+   same way. Surfaces that are only ever seen from one side get an inner face
+   while parts are off the car.
    ========================================================================= */
-// k: 0 whole .. 1 apart; parts: [{ o: what moves, d: where to, t: when }]; panels, twins and pieces only exist once the car has been apart
-const XPL = { k: 0, want: 0, parts: [], ready: false, panels: [], twins: [], pieces: [] };
-const XPL_OUT = 1.9, XPL_IN = 1.5;   // seconds to come apart and to go back together
-const XPL_SPAN = 0.55;               // share of that time one piece is on the move
-// per view: how much further back the camera sits and how much higher it looks (m) to keep all of it in the picture
-const XPL_VIEW = { front: [0.3, 0.45], rear: [0.3, 0.45], side: [0.25, 0.45], top: [0.5, 1.0], wheel: [0.6, 0.45], cabin: [0.7, 0.45], driver: [0, 0] };
-const XPL_SHADOW = 1.4;              // the contact shadow covers this much more ground
+// the systems, in the order of their buttons. list: the parts of a bay row by row ("/" starts a new row; + and - are
+// the car's right and left side, a digit is the wheel). Rows run away from the car unless they run along it; gap is the
+// floor between the parts of a row where the usual is too little.
+const XPL_MODS = [
+  { id: 'body', name: '车身', list: 'fenderF+ bonnet fenderF- / fenderR+ deck fenderR-' },
+  { id: 'doors', name: '车门', list: 'doorTrim+ doorOuter+ doorGlass+ mirror+ / doorTrim- doorOuter- doorGlass- mirror-' },
+  { id: 'canopy', name: '座舱盖', list: 'pillar+ glass pillar- / quarter+ roof quarter- / scoop' },
+  { id: 'aero', name: '空力', along: true, list: 'skirt+ skirt- / splitter diffuser plane flap spoiler / plate+ plate- pylon+ pylon- fin / canard+ canard- fence+ fence-' },
+  { id: 'cabin', name: '内饰', list: 'pedals steer / dash / seat- console seat+ / bulkhead' },
+  { id: 'wheels', name: '轮组', gap: 0.3, list: [0, 1, 2, 3].map((n) => ['upright', 'brake', 'disc', 'rim', 'tyre', 'lock'].map((p) => p + n).join(' ')).join(' / ') },
+  { id: 'tail', name: '尾部', along: true, list: 'tail / taillight / exhaust' },
+];
+// where the bays lie: in a band beside the car to its left and to its right (front to rear), and behind it
+const XPL_BANDS = { L: ['aero', 'body', 'canopy'], R: ['wheels', 'cabin', 'doors'], B: ['tail'] };
+const XPL_OF = {};
+for (const m of XPL_MODS) { m.rows = m.list.split(' / ').map((r) => r.split(' ')); for (const k of m.rows.flat()) XPL_OF[k] = m.id; }
+const XPL_OUT = 1.9, XPL_IN = 1.6;      // seconds for a system to be laid out and to be fitted again
+const XPL_SPAN = 0.5;                   // share of that time one part is on the move
+const XPL_GAP = 0.15, XPL_ROW = 0.22;   // floor between parts in a row, between rows (m)
+const XPL_AISLE = 0.65, XPL_BAY = 0.5;  // floor between the car and the bays, between bays
+const XPL_EDGE = 0.17;                  // a bay's outline stands this far off its parts
+// live: the store is open (the car stands switched off in the studio and parts may be out). any: parts are off the car.
+// mods: per system { k: 0 on the car .. 1 in its bay }. reg: what can move. items: the parts with their places.
+// panels, twins and pieces only exist once parts have been off the car. hold: how far out the parts go (stills of the flight).
+const XPL = { hold: 1, live: false, any: false, mods: {}, reg: [], items: [], bays: {}, box: null, floor: null, fade: 0, hover: '', shadow: 1, ready: false, panels: [], twins: [], pieces: [] };
+for (const m of XPL_MODS) XPL.mods[m.id] = { k: 0, wait: 0, hot: 0 };
 
-// where each piece goes [x forward, y up, z outward (to its own side), start on the 0..1 timeline].
-// Pieces of a piece (door glass, wing end plates, tyres) are placed relative to what carries them.
-const XPL_LAY = {
-  // bodywork: the panels lift off the tub, the doors come away sideways
-  bonnet: [0.50, 0.66, 0, 0.03], deck: [-0.30, 0.66, 0, 0.03],
-  fenderF: [0.10, 0.42, 0.22, 0.08], fenderR: [-0.10, 0.42, 0.22, 0.08],
-  door: [0, 0.10, 0.85, 0], doorTrim: [0, 0, -0.30, 0.24], doorGlass: [0, 0.40, 0.06, 0.24], mirror: [0.16, 0.08, 0.22, 0.28],
-  // canopy
-  glass: [0.15, 1.08, 0, 0.14], pillar: [0.18, 1.00, 0.30, 0.17], roof: [-0.05, 1.42, 0, 0.20], quarter: [-0.25, 1.00, 0.38, 0.18],
-  liner: 'roof', linerQ: 'quarter', scoop: [-0.08, 1.64, 0, 0.26], fin: [-0.42, 0.95, 0, 0.10],
-  // aero
-  splitter: [0.65, 0, 0, 0.10], fence: [0.65, 0.16, 0.12, 0.16], canard: [0.78, 0.08, 0.50, 0.14],
-  skirt: [0, 0, 0.45, 0.10], diffuser: [-0.85, 0, 0, 0.12],
-  wing: [-0.55, 1.20, 0, 0.02], flap: [-0.13, 0.14, 0, 0.28], plate: [0, 0, 0.22, 0.26], pylon: [0.05, -0.22, 0, 0.24],
-  spoiler: [-0.45, 0.98, 0, 0.02],
-  // tail
-  tail: [-0.50, 0, 0, 0.06], taillight: [-0.75, 0.06, 0, 0.14], exhaust: [-0.98, 0, 0, 0.20],
-  // cabin
-  seat: [-0.02, 0.62, 0.06, 0.36], console: [0, 0.20, 0, 0.30], dash: [0.10, 0.42, 0, 0.34], steer: [-0.16, 0.56, 0, 0.42],
-  pedals: [0.04, 0.24, 0, 0.38], bulkhead: [-0.26, 0.40, 0, 0.32],
-  // wheels: the whole corner moves out, then comes apart along its axle
-  wheel: [0, 0, 0.55, 0.12], tyre: [0, 0, 0.38, 0.34], lock: [0, 0, 0.58, 0.42], disc: [0, 0, -0.24, 0.32], brake: [-0.13, 0, -0.24, 0.36], upright: [0, 0, -0.40, 0.30],
-};
-function xplAdd(o, name, side = 0) {
-  let L = XPL_LAY[name];
-  if (typeof L === 'string') L = XPL_LAY[L];
-  if (L) XPL.parts.push({ o, d: new V3(L[0], L[1], L[2] * (side || 1)), t: L[3] });
+const xplKey = (name, side = 0) => name + (side > 0 ? '+' : side < 0 ? '-' : '');
+function xplAdd(o, key, panel = false) {
+  if (XPL_OF[key]) XPL.reg.push({ o, key, mod: XPL_OF[key], panel });
+}
+function xplFloorOff() {
+  if (!XPL.floor) return;
+  XPL.floor.traverse((o) => { if (o.geometry) { o.geometry.dispose(); o.material.dispose(); } });
+  scene.remove(XPL.floor);
+  XPL.floor = null;
 }
 function xplReset() {
-  Object.assign(XPL, { k: 0, parts: [], ready: false, panels: [], twins: [], pieces: [] });
+  for (const m of XPL_MODS) Object.assign(XPL.mods[m.id], { k: 0, wait: 0, hot: 0 });
+  Object.assign(XPL, { live: false, any: false, reg: [], items: [], bays: {}, box: null, fade: 0, shadow: 1, ready: false, panels: [], twins: [], pieces: [] });
+  xplFloorOff();
   if (BODY.shell) BODY.shell.visible = true;
   shadowScale(1);
 }
 
-// the registry for one car: called when it has been built
+// what can come off the car just built
 function buildExplode() {
   xplReset();
   // named children of the body: one carrier per name and side
   const carriers = new Map();
   for (const o of [...car.children]) {
-    const name = o.userData.part;
-    if (!name) continue;
-    const key = name + '|' + o.userData.side;
+    if (!o.userData.part) continue;
+    const key = xplKey(o.userData.part, o.userData.side);
     let h = carriers.get(key);
-    if (!h) { h = new THREE.Group(); carriers.set(key, h); car.add(h); xplAdd(h, name, o.userData.side); }
+    if (!h) { h = new THREE.Group(); carriers.set(key, h); car.add(h); xplAdd(h, key); }
     h.add(o);
   }
   for (const s of [-1, 1]) {
     const D = DOORS[s];
-    if (D) { xplAdd(D.inner, 'doorTrim', s); xplAdd(D.pane, 'doorGlass', s); if (D.mirror) xplAdd(D.mirror, 'mirror', s); }
-    xplAdd(BODY.wingSub.plates[s], 'plate', s); xplAdd(BODY.wingSub.pylons[s], 'pylon', s);
+    if (D) { xplAdd(D.outer, xplKey('doorOuter', s)); xplAdd(D.inner, xplKey('doorTrim', s)); xplAdd(D.pane, xplKey('doorGlass', s)); if (D.mirror) xplAdd(D.mirror, xplKey('mirror', s)); }
+    xplAdd(BODY.wingSub.plates[s], xplKey('plate', s)); xplAdd(BODY.wingSub.pylons[s], xplKey('pylon', s));
   }
-  xplAdd(BODY.wingSub.flap, 'flap');
+  xplAdd(BODY.wingSub.plane, 'plane'); xplAdd(BODY.wingSub.flap, 'flap');
   const C = BODY.cabin;
-  xplAdd(C.seatL, 'seat', -1); xplAdd(C.seatR, 'seat', 1); xplAdd(C.console, 'console'); xplAdd(C.dash, 'dash'); xplAdd(C.wheel, 'steer');
+  xplAdd(C.seatL, 'seat-'); xplAdd(C.seatR, 'seat+'); xplAdd(C.console, 'console'); xplAdd(C.dash, 'dash'); xplAdd(C.wheel, 'steer');
   xplAdd(C.pedals, 'pedals'); xplAdd(C.bulkhead, 'bulkhead');
   // the headlining goes with the roof and the rear quarters it lines
-  xplAdd(C.liner, 'liner'); xplAdd(C.linerL, 'linerQ', -1); xplAdd(C.linerR, 'linerQ', 1);
-  for (const w of WHEEL_OBJS) {
-    const S = w.userData.sub;
-    xplAdd(w, 'wheel', w.userData.side);
-    for (const k of ['tyre', 'lock', 'disc', 'brake', 'upright']) xplAdd(S[k], k);
-  }
+  xplAdd(C.liner, 'roof'); xplAdd(C.linerL, 'quarter-'); xplAdd(C.linerR, 'quarter+');
+  WHEEL_OBJS.forEach((w, n) => { for (const k of ['tyre', 'rim', 'lock', 'disc', 'brake', 'upright']) xplAdd(w.userData.sub[k], k + n); });
 }
 
 /* ---------- cutting the skin into panels ---------- */
-// panels: 0 tub, 1 bonnet, 2/3 front fenders (right, left), 4 engine cover, 5/6 rear fenders
-const XPL_PANELS = [['tub', 0], ['bonnet', 0], ['fenderF', 1], ['fenderF', -1], ['deck', 0], ['fenderR', 1], ['fenderR', -1]];
+// panels: 0 tub (stays on the floor pan), 1 bonnet, 2/3 front fenders (right, left), 4 engine cover, 5/6 rear fenders
+const XPL_PANELS = ['tub', 'bonnet', 'fenderF+', 'fenderF-', 'deck', 'fenderR+', 'fenderR-'];
 function xplCutter() {
   const [hx, hz] = SPEC.body.seams.hood, [dx, dz] = SPEC.body.seams.deck;
   const region = (x, z) => (x >= hx ? (z >= hz ? 2 : z <= -hz ? 3 : 1) : x <= dx ? (z >= dz ? 5 : z <= -dz ? 6 : 4) : 0);
@@ -177,7 +179,7 @@ function xplMaterials() {
   M.barrelOut = M.rimBarrel.clone(); M.barrelOut.side = THREE.FrontSide;
 }
 
-// everything that is only needed while the car is apart, made the first time it is
+// everything that is only needed while parts are off the car, made the first time they are
 function xplPrepare() {
   if (XPL.ready) return;
   XPL.ready = true;
@@ -191,7 +193,7 @@ function xplPrepare() {
     xplTwin(m, M.shellBack);
     car.add(h);
     carriers[r] = h; XPL.panels.push(h);
-    xplAdd(h, XPL_PANELS[r][0], XPL_PANELS[r][1]);
+    xplAdd(h, XPL_PANELS[r], true);
   });
   for (const d of BODY.shell.children) {
     if (d === BODY.skin || !d.isMesh) continue;
@@ -211,49 +213,248 @@ function xplPrepare() {
   }
   for (const w of WHEEL_OBJS) { xplTwin(w.userData.sub.carcass, M.rubberBack); xplTwin(w.userData.sub.barrel, M.barrelOut); }
 }
-// the cut panels stand in for the shell while the car is apart; their lettering shows what the shell's would
+// the cut panels stand in for the shell while anything is off the car; their lettering shows what the shell's would
 function xplSync() {
   if (!XPL.ready) return;
-  const apart = XPL.k > 0;
-  BODY.shell.visible = !apart;
-  for (const h of XPL.panels) h.visible = apart;
-  for (const t of XPL.twins) t.visible = apart;
+  BODY.shell.visible = !XPL.any;
+  for (const h of XPL.panels) h.visible = XPL.any;
+  for (const t of XPL.twins) t.visible = XPL.any;
   for (const [m, d] of XPL.pieces) m.visible = d.visible;
 }
 
+/* ---------- the floor plan ---------- */
+// is anything of it there to be seen (the wing not fitted, the track kit off)
+function xplShown(o) {
+  for (let q = o; q && q !== carRoot; q = q.parent) if (!q.visible) return false;
+  let any = false;
+  const walk = (q) => { if (any || !q.visible) return; if (q.isMesh) { any = true; return; } q.children.forEach(walk); };
+  walk(o);
+  return any;
+}
+// the rows of a bay, packed: u along the row, v across the rows; each row centred
+function xplPack(rows, size, gap) {
+  const len = (r) => r.reduce((s, k) => s + size.get(k)[0], 0) + gap * (r.length - 1);
+  const U = Math.max(...rows.map(len)), slots = new Map();
+  let V = 0;
+  for (const r of rows) {
+    const deep = Math.max(...r.map((k) => size.get(k)[1]));
+    let u = (U - len(r)) / 2;
+    for (const k of r) { slots.set(k, [u + size.get(k)[0] / 2, V + deep / 2]); u += size.get(k)[0] + gap; }
+    V += deep + XPL_ROW;
+  }
+  return { U, V: V - XPL_ROW, slots };
+}
+const _xb = new THREE.Box3(), _xm = new THREE.Matrix3(), UP = new V3(0, 1, 0);
+// every part's place on the floor, from the sizes of the parts as they are now
+function xplLayout() {
+  // measured on the car: nothing moved, doors shut, wheels and steering wheel straight
+  for (const r of XPL.reg) r.o.position.set(0, 0, 0);
+  const keep = [];
+  for (const o of [DOORS[1] && DOORS[1].pivot, DOORS[-1] && DOORS[-1].pivot, CAB.spin, ...FRONT_PIVOTS]) if (o) { keep.push([o, o.quaternion.clone()]); o.quaternion.identity(); }
+  carRoot.updateMatrixWorld(true);
+  const items = new Map();
+  for (const r of XPL.reg) {
+    let it = items.get(r.key);
+    if (!it) items.set(r.key, it = { key: r.key, mod: r.mod, objs: [], box: new THREE.Box3(), at: null, t: 0, h: 0 });
+    if (!r.panel && !xplShown(r.o)) continue;
+    _xb.setFromObject(r.o, true);
+    if (_xb.isEmpty()) continue;
+    it.box.union(_xb);
+    it.objs.push({ o: r.o, d: new V3(), up: new V3() });
+  }
+  XPL.items = [...items.values()];
+  // each bay packed on its own: a along its band, b away from the car
+  const packed = {};
+  for (const m of XPL_MODS) {
+    const beside = !XPL_BANDS.B.includes(m.id), size = new Map();
+    for (const it of XPL.items) {
+      if (it.mod !== m.id || it.box.isEmpty()) continue;
+      const dx = it.box.max.x - it.box.min.x, dz = it.box.max.z - it.box.min.z, a = beside ? dx : dz, b = beside ? dz : dx;
+      size.set(it.key, m.along ? [a, b] : [b, a]);
+    }
+    const rows = m.rows.map((r) => r.filter((k) => size.has(k))).filter((r) => r.length);
+    if (!rows.length) continue;
+    const P = xplPack(rows, size, m.gap || XPL_GAP);
+    packed[m.id] = { A: m.along ? P.U : P.V, B: m.along ? P.V : P.U, slots: P.slots, along: m.along, order: rows.flat() };
+  }
+  // the bands: beside the car front to rear, centred on it; behind it, centred on its middle
+  const cx = (XF + XR) / 2, zin = Math.max(BC.a(0.9), BC.a(-1.3)) + 0.12 + XPL_AISLE, xin = XR - XPL_AISLE;
+  XPL.bays = {};
+  XPL.box = new THREE.Box3(new V3(XR - 0.1, 0, -1.15), new V3(XF + 0.15, 0.55, 1.15));
+  for (const [band, ids] of Object.entries(XPL_BANDS)) {
+    const list = ids.filter((id) => packed[id]), sgn = band === 'L' ? -1 : 1;
+    let a0 = -(list.reduce((s, id) => s + packed[id].A, 0) + XPL_BAY * (list.length - 1)) / 2;
+    for (const id of list) {
+      const Z = packed[id], a00 = a0;
+      // bay coordinates to the floor
+      const at = band === 'B' ? (a, b) => [xin - b, a00 + a] : (a, b) => [cx - (a00 + a), sgn * (zin + b)];
+      const p = at(0, 0), q = at(Z.A, Z.B), e = XPL_EDGE;
+      const bay = XPL.bays[id] = { x0: Math.min(p[0], q[0]) - e, x1: Math.max(p[0], q[0]) + e, z0: Math.min(p[1], q[1]) - e, z1: Math.max(p[1], q[1]) + e, band, line: null };
+      XPL.box.expandByPoint(_xp.set(bay.x0, 0, bay.z0)).expandByPoint(_xp.set(bay.x1, 0, bay.z1));
+      Z.order.forEach((k, i) => {
+        const it = items.get(k), s = Z.slots.get(k), w = Z.along ? at(s[0], s[1]) : at(s[1], s[0]);
+        it.at = new V3(w[0] - (it.box.min.x + it.box.max.x) / 2, 0.015 - it.box.min.y, w[1] - (it.box.min.z + it.box.max.z) / 2);
+        it.t = Z.order.length > 1 ? (1 - XPL_SPAN) * i / (Z.order.length - 1) : 0;
+        // it flies in an arc, higher the further it goes
+        it.h = clamp(0.16 * Math.hypot(it.at.x, it.at.z), 0.25, 0.9);
+        for (const j of it.objs) {
+          _xm.setFromMatrix4(j.o.parent.matrixWorld).invert();
+          j.d.copy(it.at).applyMatrix3(_xm); j.up.copy(UP).applyMatrix3(_xm);
+        }
+      });
+      a0 += Z.A + XPL_BAY;
+    }
+  }
+  for (const [o, q] of keep) o.quaternion.copy(q);
+  // the contact shadow reaches as far as the bays do
+  const B = XPL.box;
+  XPL.shadow = Math.max(1, (2 * Math.max(-B.min.x, B.max.x) + 0.6) / SHW, (2 * Math.max(-B.min.z, B.max.z) + 0.6) / SHD);
+  xplFloor();
+  xplPose();
+}
+// the outline of each bay on the floor
+function xplFloor() {
+  xplFloorOff();
+  const g = XPL.floor = new THREE.Group();
+  g.userData.noShadow = true;
+  const rr = (s, x0, z0, x1, z1, r) => {
+    s.moveTo(x0 + r, z0); s.lineTo(x1 - r, z0); s.quadraticCurveTo(x1, z0, x1, z0 + r); s.lineTo(x1, z1 - r); s.quadraticCurveTo(x1, z1, x1 - r, z1);
+    s.lineTo(x0 + r, z1); s.quadraticCurveTo(x0, z1, x0, z1 - r); s.lineTo(x0, z0 + r); s.quadraticCurveTo(x0, z0, x0 + r, z0);
+  };
+  for (const b of Object.values(XPL.bays)) {
+    const w = 0.022, shape = new THREE.Shape(), hole = new THREE.Path();
+    rr(shape, b.x0, b.z0, b.x1, b.z1, 0.14); rr(hole, b.x0 + w, b.z0 + w, b.x1 - w, b.z1 - w, 0.14 - w);
+    shape.holes.push(hole);
+    // (the shape's y is the floor's z: turned down onto it)
+    b.line = new THREE.Mesh(new THREE.ShapeGeometry(shape, 6).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xecebe6, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    b.line.position.y = 0.004;
+    b.line.renderOrder = 1;
+    g.add(b.line);
+  }
+  g.visible = false;
+  scene.add(g);
+}
+
 /* ---------- per frame ---------- */
-// apart only while the car stands switched off in the studio; anything else puts it back together first
+// the store is only open while the car stands switched off in the studio; anything else puts the car together first
 function xplWanted() {
   const d = DRIVE;
   return state.explode && state.pose === 'park' && d.prog === 'park' && d.v === 0 && d.engine === 0 && d.start <= 0 && !AERO.on;
 }
 function xplPose() {
-  const k = XPL.k;
-  for (const p of XPL.parts) p.o.position.copy(p.d).multiplyScalar(ease(clamp((k - p.t) / XPL_SPAN, 0, 1)));
-  shadowScale(1 + (XPL_SHADOW - 1) * sstep(0, 0.4, k));
+  let kmax = 0;
+  for (const it of XPL.items) {
+    const k = XPL.mods[it.mod].k, e = it.at ? ease(clamp((k - it.t) / XPL_SPAN, 0, 1)) : 0, arc = it.h * Math.sin(Math.PI * e);
+    for (const j of it.objs) j.o.position.copy(j.d).multiplyScalar(e).addScaledVector(j.up, arc);
+    kmax = Math.max(kmax, k);
+  }
+  shadowScale(1 + (XPL.shadow - 1) * sstep(0, 0.12, kmax));
+}
+// the store opens or closes: the camera goes up to look over the floor, or back down to the car
+function xplOpen(live) {
+  XPL.live = live;
+  const n = XPL_MODS.length;
+  XPL_MODS.forEach((m, i) => { XPL.mods[m.id].wait = (live ? i : n - 1 - i) * 0.1; });
+  if (live) {
+    xplPrepare();
+    xplLayout();
+    if (state.doors && state.apart.doors) setDoors(false);
+  }
+  if (state.view !== 'driver') goView(state.view, window.__TEST__ ? 0 : 1.7);
+}
+// a change of kit or wing while the store is open: the bays are packed again
+function xplRefit() {
+  if (XPL.live) { xplLayout(); needsRender = true; }
 }
 function updateExplode(dt, snap = false) {
-  const want = XPL.want = xplWanted() ? 1 : 0;
-  if (XPL.k === want) return false;
-  if (want) xplPrepare();
-  const was = XPL.k;
-  XPL.k = snap || reduceMotion ? want : want > was ? Math.min(want, was + dt / XPL_OUT) : Math.max(want, was - dt / XPL_IN);
-  if ((was > 0) !== (XPL.k > 0)) xplSync();
-  xplPose();
-  shadowDirty = Math.max(shadowDirty, 2);
-  return true;
+  const live = xplWanted(), still = snap || reduceMotion;
+  if (live !== XPL.live) xplOpen(live);
+  let active = false, moved = false;
+  for (const m of XPL_MODS) {
+    const S = XPL.mods[m.id], want = live && state.apart[m.id] ? XPL.hold : 0;
+    if (S.k === want) { S.wait = 0; continue; }
+    active = true;
+    if (!still && S.wait > 0) { S.wait -= dt; continue; }
+    S.k = still ? want : want > S.k ? Math.min(want, S.k + dt / XPL_OUT) : Math.max(want, S.k - dt / XPL_IN);
+    moved = true;
+  }
+  if (moved) {
+    const any = XPL_MODS.some((m) => XPL.mods[m.id].k > 0);
+    if (any !== XPL.any) { XPL.any = any; xplSync(); }
+    xplPose();
+    shadowDirty = Math.max(shadowDirty, 2);
+  }
+  // the bay outlines: there while the store is open, brighter for the system that is moving or pointed at
+  if (XPL.floor) {
+    const f = live ? 1 : 0, r = still ? 1 : 1 - Math.exp(-dt * 5);
+    if (XPL.fade !== f) { XPL.fade += (f - XPL.fade) * r; if (Math.abs(XPL.fade - f) < 0.004) XPL.fade = f; active = true; }
+    for (const m of XPL_MODS) {
+      const S = XPL.mods[m.id], b = XPL.bays[m.id], hot = XPL.hover === m.id || (S.k > 0 && S.k < 1) ? 1 : 0;
+      if (S.hot !== hot) { S.hot += (hot - S.hot) * r; if (Math.abs(S.hot - hot) < 0.004) S.hot = hot; active = true; }
+      if (b) b.line.material.opacity = XPL.fade * (0.14 + 0.4 * S.hot);
+    }
+    XPL.floor.visible = XPL.fade > 0;
+  }
+  return active;
 }
-// the camera backs away and looks higher at once when the car comes apart, and closes in as the pieces come home
-const xplView = () => Math.max(XPL.want, ease(XPL.k));
-const xplPull = () => 1 + XPL_VIEW[state.view][0] * xplView();
-const xplLift = () => XPL_VIEW[state.view][1] * xplView();
+
+/* ---------- camera ---------- */
+// from where the floor is looked over: [azimuth from straight ahead, elevation] (deg). On an upright screen the front
+// and rear views look along the car, so that its length runs up the screen.
+const XPL_LOOK = { front: [62, 34], rear: [118, 34], side: [90, 46], top: [90, 84] };
+const _xc = new V3(), _xr = new V3(), _xu = new V3(), _xp = new V3();
+// the view of the whole floor, or of the wheel and cabin bays for their views; null where the usual view serves
+function xplView(name) {
+  if (!XPL.live || !XPL.box) return null;
+  let box = XPL.box, look = XPL_LOOK[name];
+  if (name === 'wheel' || name === 'cabin') {
+    const id = name === 'wheel' ? 'wheels' : 'cabin', b = XPL.bays[id];
+    if (!b || !state.apart[id]) return null;
+    box = new THREE.Box3(new V3(b.x0, 0, b.z0), new V3(b.x1, 0.75, b.z1));
+    look = [b.band === 'L' ? -64 : 64, 34];
+  }
+  if (!look) return null;
+  let [az, el] = look;
+  const a = camera.aspect;
+  if (a < 1 && (name === 'front' || name === 'rear')) az = name === 'front' ? 12 : 168;
+  const dir = new V3(Math.cos(RAD(el)) * Math.cos(RAD(az)), Math.sin(RAD(el)), Math.cos(RAD(el)) * Math.sin(RAD(az)));
+  // far enough for every corner of the box to be in the picture, in the part of it the header and the rail leave free
+  // (the rail is out of the way while the phone sheet is open, and the picture is shifted above the sheet)
+  const [, h] = size0(), rail = document.querySelector('.rail');
+  const top = 58, bot = rail && !(state.panel && sheetLayout()) ? Math.max(0, h - rail.getBoundingClientRect().top) : 0;
+  const free = clamp((h - top - bot) / h, 0.45, 1), tv = Math.tan(RAD(viewFov(name, a)) / 2), th = tv * a;
+  box.getCenter(_xc);
+  _xr.crossVectors(UP, dir).normalize(); _xu.crossVectors(dir, _xr);
+  let d = 0;
+  for (let i = 0; i < 8; i++) {
+    _xp.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).sub(_xc);
+    const near = _xp.dot(dir);
+    d = Math.max(d, near + Math.abs(_xp.dot(_xr)) / (th * 0.92), near + Math.abs(_xp.dot(_xu)) / (tv * free * 0.94));
+  }
+  d *= pull;
+  // looking a little below the middle of the floor puts it in the middle of that free part
+  const t = _xc.clone().addScaledVector(_xu, -d * tv * (bot - top) / h);
+  return { p: dir.multiplyScalar(d).add(t), t };
+}
+
+/* ---------- switches ---------- */
+// everything off the car and into the bays, or everything back onto it
 function setExplode(on) {
   state.explode = on;
   if (on) {
+    for (const m of XPL_MODS) state.apart[m.id] = true;
     if (AERO.on) setAero(false);
     if (state.pose !== 'park') setPose('park');
     if (state.view === 'driver') goView('front');
   }
+  needsRender = true;
+  syncUI();
+}
+// one system into its bay, or back onto the car
+function setModule(id, apart) {
+  if (!state.explode || !(id in state.apart)) return;
+  state.apart[id] = apart;
+  if (apart && id === 'doors' && state.doors) setDoors(false);
   needsRender = true;
   syncUI();
 }

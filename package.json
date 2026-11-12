@@ -2,7 +2,7 @@
   "name": "halcyon-h9",
   "private": true,
   "version": "1.0.0",
-  "description": "Procedural car range and configurator in three.js: four models, paints, wheels, aero kits, cockpit, exploded view, driving dynamics, airflow visualisation and synthesised sound.",
+  "description": "Procedural car range and configurator in three.js: four models, paints, wheels, aero kits, cockpit, parts store, driving dynamics, airflow visualisation and synthesised sound.",
   "scripts": {
     "build": "python3 build.py",
     "serve": "npx --yes serve public -l 8080",
