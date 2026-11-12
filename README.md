@@ -15,6 +15,18 @@ The model is chosen in the header (or with `?car=g8`, `e4`, `r10`); the car is t
 
 - Configurator: presets per model, 10 colours × 7 finishes (metallic, pearl, gloss, matte, chrome, chameleon, carbon), 4 wheel designs, rim and caliper colours, GT wing / active spoiler / no wing, track and road aero kits, 5 liveries, 4 interiors
 - Butterfly doors, deployable wing and airbrake
+- Parts store: one button takes the parked car apart and sets its parts out on the studio floor around the bare tub, sorted by system into seven outlined bays; the same button puts it all back together. While the store is open the systems have their own buttons, so each can be fitted to the car or taken off on its own:
+  - body: bonnet, engine cover and the four fenders, cut from the skin along its shut lines, each keeping the lights, vents and lettering on it
+  - doors: outer panels, trim panels, windows, mirrors
+  - canopy: windscreen, pillars, roof and rear quarters with their headlining, roof scoop
+  - aero: splitter, fences, canards, skirts, diffuser, wing (main plane, flap, end plates, pylons) or spoiler, fin
+  - cabin: seats, dashboard, steering wheel, console, pedals, bulkhead
+  - wheels: per corner the upright, caliper, disc, wheel, tyre and centre lock, in a row along the axle
+  - tail: tail panel, light bar, exhausts
+
+  Any part, lying in its bay or fitted to the car, is picked up with a click: it rises to eye level and floats there, the camera comes in, the studio darkens behind it and the part stands in a light of its own (a tent of soft boxes on every side and a key lamp over the camera's shoulder). A drag turns the part itself about its middle, so every side of it can be brought into the light; zooming in shows the paint flake, the carbon weave, the stitching. With the turntable on, the held part turns by itself. A click beside it, Escape or a view button sets it down where it lay.
+
+  The bays are packed from the sizes of the parts, so they suit every model and configuration (parts not fitted, such as the other wing or the track kit, take no place). The camera rises to look over the whole floor (the wheel and cabin views look at their bays); pointing at a system's button lights its bay. While the store is open the system buttons take the place of the driving programs, and the airflow view puts the car together first; asked for while driving, the car parks, switches off and is then taken apart
 - Detailed cockpit with a first-person driver view that rides the body and leans with the g-forces
 - Vehicle model, per car: torque curve and gearbox (dual-clutch, automatic, sequential, or a single electric reduction with regeneration), rear- or all-wheel drive, tyres with load sensitivity, drag and downforce per axle, ABS brakes with a torque cap, traction and launch control, active low-drag wing trim at V-max, suspension springs with aero compression. Each model has its own attitude: pitch and roll per g, spring frequencies and damping, ride height, rake and camber
 - Driving programs on a procedurally generated night circuit:
@@ -40,6 +52,7 @@ The model is chosen in the header (or with `?car=g8`, `e4`, `r10`); the car is t
 | `src/blk_aero.js` | Pressure map, force arrows, loads; potential-flow fallback |
 | `src/blk_flow.js` | 3D lattice-Boltzmann tunnel: solver, voxelised car, smoke streaklines, physics checks |
 | `src/blk_audio.js` | Sound engine (AudioWorklet engine voice from a firing table, electric motors, supercharger, gear whine) and music |
+| `src/blk_explode.js` | Parts store: the systems and their bays, the floor plan packed from the parts' sizes, the skin cut into panels along the shut lines, inner faces for one-sided surfaces, the overview camera, picking a part up to turn it in its own light |
 | `src/page.template.html` | Markup and styles |
 | `src/fonts.css` | `@font-face` rules for the self-hosted fonts (generated) |
 | `build.py` | Inlines the app into `public/index.html` and copies the three.js modules it imports into `public/vendor/` |
@@ -86,6 +99,7 @@ node tools/drive.js                          # drives every model through the pr
 node tools/selfhost_check.js                 # fails if the built page fetches anything off-site
 node tools/hdr_check.js                      # fails if over-bright highlights turn into black blocks after bloom
 node tools/flow_check.js                     # airflow solver: drag of a square plate against the measured value, checks on the car's flow (--car=g8 for another model)
+node tools/explode.js                        # parts store: every model laid out and put together again (panels cover the skin, every part on the floor in its bay, none overlapping, a part picked up and let go, one system alone), then the buttons, a part picked up by a click, driving and airflow (--shots saves stills, --stills skips the clicks)
 CAR=e4 VIEWS=front34,side node tools/shot.js out/e4   # stills of a model
 ```
 

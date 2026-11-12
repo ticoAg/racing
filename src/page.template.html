@@ -138,6 +138,8 @@ body.panel-open { --panel-space: calc(var(--panel-w) + var(--gutter-r) + 8px); }
 }
 .seg:hover { color: var(--ink); }
 .seg[aria-checked="true"], .seg[aria-current="true"] { color: var(--ink); background: var(--wash-strong); }
+.seg[aria-pressed="true"] { color: var(--ink); background: var(--wash-strong); }
+.group[hidden] { display: none; }
 .poses .seg[aria-checked="true"] { box-shadow: inset 0 -2px 0 var(--livery-red); }
 
 .tog[data-toggle="sound"] .snd-off { display: none; }
@@ -417,6 +419,9 @@ body.is-ready .rail { opacity: 1; transform: translate(-50%, 0); }
     <button class="tog" type="button" data-toggle="lights" aria-label="灯光" title="灯光">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.5 5.5C8 5.5 4.5 8.2 4.5 12s3.5 6.5 8 6.5h1v-13h-1z"/><path d="M16.5 7.5l4-1M16.5 12h4.5M16.5 16.5l4 1"/></svg>
     </button>
+    <button class="tog" type="button" data-toggle="explode" data-off="分解" data-on="组合" aria-label="分解" title="分解">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.2l7.5 3.6L12 10.4 4.5 6.8z"/><path d="M4.5 11.6L12 15.2l7.5-3.6"/><path d="M4.5 16.4L12 20l7.5-3.6"/></svg>
+    </button>
     <button class="tog" type="button" data-toggle="aero" aria-label="气流" title="气流">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 8.5h9.5a2.5 2.5 0 1 0-2.5-2.5"/><path d="M3 12.5h14a2.5 2.5 0 1 1-2.5 2.5"/><path d="M3 16.5h6.5"/></svg>
     </button>
@@ -437,6 +442,7 @@ body.is-ready .rail { opacity: 1; transform: translate(-50%, 0); }
     <button class="seg" type="button" role="radio" data-pose="corner">过弯</button>
     <button class="seg" type="button" role="radio" data-pose="brake">制动</button>
   </div>
+  <div class="group mods" id="mods" role="group" aria-label="系统" hidden></div>
   <span class="sep" aria-hidden="true"></span>
   <div class="group views" aria-label="视角">
     <button class="seg" type="button" data-view="front">前视</button>

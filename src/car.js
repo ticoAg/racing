@@ -176,6 +176,8 @@ const carRoot = new THREE.Group();
 scene.add(carRoot);
 const car = new THREE.Group(); // sprung body: poses tilt and lower this group
 carRoot.add(car);
+// names a part of the car for the parts store (blk_explode.js): everything with one name and side is one part
+const part = (o, name, side = 0) => { o.userData.part = name; o.userData.side = side; return o; };
 
 /* =========================================================================
    Procedural textures
@@ -633,8 +635,11 @@ function buildBody() {
   const under = mergeGeometries([gridGeometry(ceilR), gridGeometry(ceilL), gridGeometry(wallR), gridGeometry(wallL), gridGeometry(floorRows)]);
   const skin = new THREE.Mesh(skinGeo, [M.paint, M.interior]);
   const underMesh = new THREE.Mesh(under, M.under);
-  car.add(skin, underMesh);
-  BODY.skin = skin;
+  // the skin and everything laid onto it (lights, vents, lettering) make up the shell
+  BODY.shell = new THREE.Group();
+  BODY.shell.add(skin);
+  car.add(BODY.shell, underMesh);
+  BODY.skin = skin; BODY.under = underMesh;
 
   // Tail cap (flat Kamm face) from the last section ring
   const last = sections[0].s;
@@ -704,7 +709,7 @@ function buildCanopy() {
   };
   const glass = new THREE.Mesh(patchGeometry(64, 96, wsP, null), M.glass);
   glass.renderOrder = 2;
-  car.add(glass);
+  car.add(part(glass, 'glass'));
   REFL_HIDE.push(glass);
   BODY.glass = glass;
   // side windows travel with the doors (parented in buildDoors)
@@ -736,7 +741,7 @@ function buildCanopy() {
     return OFF * taper(Math.min(dFront, dSide));
   };
   const roof = new THREE.Mesh(patchGeometry(90, 60, roofP, roofOff, { flip: false }), M.paint);
-  car.add(roof);
+  car.add(part(roof, 'roof'));
   BODY.roof = roof;
   for (const side of [-1, 1]) {
     const qP = (u, v) => {
@@ -746,7 +751,7 @@ function buildCanopy() {
     };
     const qOff = (u, v) => { const phi = u * PHI_RAIL; const X = lerp(CX0, XB(phi), v); return OFF * taper(XB(phi) - X); };
     const q = new THREE.Mesh(patchGeometry(40, 70, qP, qOff, { flip: side < 0 }), M.paint);
-    car.add(q);
+    car.add(part(q, 'quarter', side));
     BODY['quarter' + side] = q;
   }
   // A-pillars
@@ -773,7 +778,7 @@ function buildCanopy() {
     const nrm = g.attributes.normal; let sz = 0;
     for (let k = 0; k < nrm.count; k++) sz += nrm.getZ(k);
     if (Math.sign(sz) !== side) { const idx = g.index.array; for (let k = 0; k < idx.length; k += 3) { const tmp = idx[k + 1]; idx[k + 1] = idx[k + 2]; idx[k + 2] = tmp; } g.computeVertexNormals(); }
-    car.add(new THREE.Mesh(g, M.pillar || (M.pillar = Object.assign(M.blackGloss.clone(), { side: THREE.DoubleSide }))));
+    car.add(part(new THREE.Mesh(g, M.pillar || (M.pillar = Object.assign(M.blackGloss.clone(), { side: THREE.DoubleSide }))), 'pillar', side));
   }
 }
 
@@ -929,12 +934,15 @@ function buildDoors() {
     pivot.position.copy(H);
     const content = new THREE.Group();
     content.position.copy(H).negate();
-    content.add(skin, card, band);
-    if (BODY.doorGlass && BODY.doorGlass[side]) content.add(BODY.doorGlass[side]);
+    // outer panel with its edge band, trim panel, window: each can come off the door
+    const outer = new THREE.Group(), inner = new THREE.Group(), pane = new THREE.Group();
+    outer.add(skin, band); inner.add(card);
+    if (BODY.doorGlass && BODY.doorGlass[side]) pane.add(BODY.doorGlass[side]);
+    content.add(outer, inner, pane);
     pivot.add(content);
     car.add(pivot);
     const axis = new V3(HINGE.ax[0], HINGE.ax[1], HINGE.ax[2] * side).normalize();
-    DOORS[side] = { pivot, content, skin, card, axis, angle: HINGE.angle * side };
+    DOORS[side] = { pivot, content, skin, card, outer, inner, pane, axis, angle: HINGE.angle * side };
   }
   buildJambs();
   car.updateMatrixWorld(true);
@@ -1157,8 +1165,13 @@ function makeWheel(ax, mirrored = false) {
   const g = new THREE.Group();
   const spin = new THREE.Group();
   g.add(spin);
+  // what comes off the hub one after the other: tyre, wheel, centre lock, disc (turning), caliper and upright (fixed)
+  const tyre = new THREE.Group(), rim = new THREE.Group(), lock = new THREE.Group(), disc = new THREE.Group(), brake = new THREE.Group();
+  spin.add(tyre, rim, lock, disc);
+  g.add(brake);
   const R = ax.R, hw = ax.w / 2, rimR = ax.rim, hr = ax.rimW / 2;
-  spin.add(new THREE.Mesh(lathe(makeTireProfile(R, hw, rimR), 96), M.rubber));
+  const carcass = new THREE.Mesh(lathe(makeTireProfile(R, hw, rimR), 96), M.rubber);
+  tyre.add(carcass);
   const sw = R - rimR;
   const band = [];
   for (let k = 0; k <= 8; k++) {
@@ -1166,39 +1179,40 @@ function makeWheel(ax, mirrored = false) {
     band.push([r, hw * (0.94 + 0.06 * Math.sin(Math.PI * clamp((r - rimR) / sw / 0.95, 0, 1))) + 0.0012]);
   }
   const letters = new THREE.Mesh(lathe(band.slice().reverse(), 128), new THREE.MeshStandardMaterial({ map: mirrored ? TIRE_TEX_M : TIRE_TEX, transparent: true, roughness: 0.6, metalness: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }));
-  spin.add(letters);
-  spin.add(new THREE.Mesh(lathe([[rimR - 0.012, hr + 0.004], [rimR + 0.004, hr + 0.006], [rimR + 0.016, hr + 0.005], [rimR + 0.021, hr + 0.001], [rimR + 0.022, hr - 0.006], [rimR + 0.016, hr - 0.012]].reverse(), 128), M.rimLip));
-  spin.add(new THREE.Mesh(new THREE.CylinderGeometry(rimR - 0.012, rimR - 0.012, ax.rimW, 96, 1, true).rotateX(Math.PI / 2), M.rimBarrel));
+  tyre.add(letters);
+  rim.add(new THREE.Mesh(lathe([[rimR - 0.012, hr + 0.004], [rimR + 0.004, hr + 0.006], [rimR + 0.016, hr + 0.005], [rimR + 0.021, hr + 0.001], [rimR + 0.022, hr - 0.006], [rimR + 0.016, hr - 0.012]].reverse(), 128), M.rimLip));
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(rimR - 0.012, rimR - 0.012, ax.rimW, 96, 1, true).rotateX(Math.PI / 2), M.rimBarrel);
+  rim.add(barrel);
   const designs = {};
   for (const id of WHEEL_DESIGN_IDS) {
     const m = new THREE.Mesh(buildSpokes(ax, id), M.rim);
     m.visible = id === 'yspoke';
     designs[id] = m;
-    spin.add(m);
+    rim.add(m);
   }
   const zFaceRim = hr - 0.004, hubZ = zFaceRim - ax.concave - 0.004;
-  spin.add(new THREE.Mesh(lathe([[0.0, hubZ + 0.012], [0.05, hubZ + 0.012], [0.07, hubZ + 0.004], [0.086, hubZ - 0.01], [0.086, hubZ - 0.04]].reverse(), 64), M.rim));
+  rim.add(new THREE.Mesh(lathe([[0.0, hubZ + 0.012], [0.05, hubZ + 0.012], [0.07, hubZ + 0.004], [0.086, hubZ - 0.01], [0.086, hubZ - 0.04]].reverse(), 64), M.rim));
   const nut = new THREE.Mesh(new THREE.CylinderGeometry(0.043, 0.046, 0.032, 6, 1).rotateX(Math.PI / 2), M.chrome);
   nut.position.z = hubZ + 0.026; nut.rotation.z = 0.3;
-  spin.add(nut);
+  lock.add(nut);
   const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.029, 0.031, 0.02, 40).rotateX(Math.PI / 2), M.caliper);
   cap.position.z = hubZ + 0.046;
-  spin.add(cap);
+  lock.add(cap);
   const dz = -0.012, th = 0.036, rIn = 0.128, rOut = ax.disc;
-  spin.add(new THREE.Mesh(lathe([[rIn, dz - th], [rOut, dz - th], [rOut, dz], [rIn, dz]].reverse(), 96), M.darkMetal));
+  disc.add(new THREE.Mesh(lathe([[rIn, dz - th], [rOut, dz - th], [rOut, dz], [rIn, dz]].reverse(), 96), M.darkMetal));
   const discFace = new THREE.Mesh(new THREE.RingGeometry(rIn, rOut, 96, 1), M.discFace);
   discFace.position.z = dz + 0.0006;
   {
     const p = discFace.geometry.attributes.position, uv = discFace.geometry.attributes.uv;
     for (let i = 0; i < p.count; i++) uv.setXY(i, p.getX(i) / (2 * rOut) + 0.5, p.getY(i) / (2 * rOut) + 0.5);
   }
-  spin.add(discFace);
-  spin.add(new THREE.Mesh(lathe([[0.06, dz + 0.004], [rIn + 0.004, dz + 0.004], [rIn + 0.004, dz - 0.012], [0.06, dz - 0.03]].reverse(), 64), new THREE.MeshStandardMaterial({ color: 0x2a2c30, metalness: 0.85, roughness: 0.35 })));
+  disc.add(discFace);
+  disc.add(new THREE.Mesh(lathe([[0.06, dz + 0.004], [rIn + 0.004, dz + 0.004], [rIn + 0.004, dz - 0.012], [0.06, dz - 0.03]].reverse(), 64), new THREE.MeshStandardMaterial({ color: 0x2a2c30, metalness: 0.85, roughness: 0.35 })));
   const blur = new THREE.Mesh(new THREE.CircleGeometry(rimR - 0.004, 72), M.blur);
   blur.position.z = hr - 0.0015;
   blur.visible = false;
   blur.renderOrder = 1;
-  spin.add(blur);
+  rim.add(blur);
   // fixed parts: caliper (trailing side), its logo, the upright
   const a0 = Math.PI - 0.62, a1 = Math.PI + 0.62, cr0 = rOut - 0.058, cr1 = rOut + 0.028;
   const shp = new THREE.Shape();
@@ -1206,15 +1220,17 @@ function makeWheel(ax, mirrored = false) {
   shp.absarc(0, 0, cr0, a1, a0, true);
   const calGeo = new THREE.ExtrudeGeometry(shp, { depth: 0.052, bevelEnabled: true, bevelThickness: 0.009, bevelSize: 0.009, bevelSegments: 4, curveSegments: 40 });
   calGeo.translate(0, 0, dz - th / 2 - 0.026);
-  g.add(new THREE.Mesh(calGeo, M.caliper));
+  brake.add(new THREE.Mesh(calGeo, M.caliper));
   const logo = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.03), new THREE.MeshStandardMaterial({ map: mirrored ? CAL_TEX_M : CAL_TEX, transparent: true, roughness: 0.4, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }));
   logo.position.set(-(cr0 + cr1) / 2, 0, dz - th / 2 + 0.026 + 0.0095);
   logo.rotation.z = Math.PI / 2;
-  g.add(logo);
+  brake.add(logo);
   const upright = new THREE.Mesh(new THREE.CylinderGeometry(0.115, 0.13, 0.08, 32).rotateX(Math.PI / 2), M.under);
   upright.position.z = dz - th - 0.05;
-  g.add(upright);
-  g.userData = { spin, designs, letters, blur, R };
+  const carrier = new THREE.Group();
+  carrier.add(upright);
+  g.add(carrier);
+  g.userData = { spin, designs, letters, blur, R, sub: { tyre, rim, lock, disc, brake, upright: carrier, carcass, barrel } };
   return g;
 }
 
@@ -1355,7 +1371,7 @@ function addDecal(mesh, center, normal, up, sx, sy, sz, mat, opts = {}) {
   if (!g.attributes.position.count) return null;
   const m = new THREE.Mesh(g, mat);
   m.renderOrder = opts.order || 3;
-  (opts.parent || car).add(m);
+  (opts.parent || (mesh === BODY.skin ? BODY.shell : car)).add(m);
   if (opts.role) DECAL_ROLES[opts.role].push(m);
   return m;
 }
@@ -1504,14 +1520,14 @@ function buildAero() {
   sg.rotateX(-Math.PI / 2);
   sg.translate(0, 0.068, 0);
   // rotateX(-90) maps shape y -> -z; our outline y is +/-z already symmetric, fine
-  car.add(new THREE.Mesh(sg, M.carbon));
+  car.add(part(new THREE.Mesh(sg, M.carbon), 'splitter'));
   // splitter vertical fences
   if (PT.fences) for (const side of [-1, 1]) {
     const zl = lipZ(XF - 0.5) + 0.02;
     const fg = extrudeXY([[XF - 0.54, 0.07], [XF - 0.32, 0.07], [XF - 0.38, 0.16], [XF - 0.52, 0.18]], 0.008, 0);
     fg.translate(0, 0, side * zl);
     const fm = new THREE.Mesh(fg, M.carbon);
-    car.add(fm);
+    car.add(part(fm, 'fence', side));
     BODY.track.push(fm);
   }
 
@@ -1527,10 +1543,10 @@ function buildAero() {
       g.rotateX(-Math.PI / 2);
       if (side < 0) g.scale(1, 1, -1);
       const m = new THREE.Mesh(g, M.carbon);
-      m.position.y = cy0;
+      // tilted nose-down about its own middle (the plan above lies at height 0 around x = cx0)
       m.rotation.z = -0.16;
-      m.position.x = cx0 * (1 - Math.cos(0.16)) - cy0 * Math.sin(0.16) * 0.0;
-      car.add(m);
+      m.position.set(cx0 * (1 - Math.cos(0.16)), cy0 + cx0 * Math.sin(0.16), 0);
+      car.add(part(m, 'canard', side));
       BODY.track.push(m);
     }
   }
@@ -1547,7 +1563,7 @@ function buildAero() {
       const prof = [[zl - 0.035, 0.064], [zl + out, 0.064], [zl + out + 0.006, 0.072], [zl + out * 0.3, 0.128], [zl - 0.035, 0.14]];
       rings.push(prof.map(([z, y]) => [X, y, side * z]));
     }
-    car.add(new THREE.Mesh(loftClosed(side > 0 ? rings : rings.map(r => r.slice().reverse())), M.carbon));
+    car.add(part(new THREE.Mesh(loftClosed(side > 0 ? rings : rings.map(r => r.slice().reverse())), M.carbon), 'skirt', side));
   }
 
   // ---- rear diffuser strakes ----
@@ -1556,7 +1572,7 @@ function buildAero() {
     const top = [];
     for (let X = XR - 0.025; X <= xStr; X += 0.04) top.push([X, BC.yf(X) + 0.01]);
     const poly = [[xStr, 0.088], [XR - 0.025, 0.088]].concat(top);
-    car.add(new THREE.Mesh(extrudeXY(poly, 0.008, z0), M.carbon));
+    car.add(part(new THREE.Mesh(extrudeXY(poly, 0.008, z0), M.carbon), 'diffuser'));
   }
 
   // ---- rear wing on swan-neck pylons ----
@@ -1584,11 +1600,14 @@ function buildAero() {
   for (let i = NP; i >= 0; i--) foil.push(toWorld(upper[i]));
   for (let i = 1; i < NP; i++) foil.push(toWorld(lower[i]));
   const wingGeo = extrudeXY(foil, span, 0);
-  wing.add(new THREE.Mesh(wingGeo, M.carbon));
+  // main plane, flap, end plates and pylons are the pieces of the wing
+  const plane = new THREE.Group(), flapMount = new THREE.Group(), plates = {}, pylons = {};
+  wing.add(plane, flapMount);
+  plane.add(new THREE.Mesh(wingGeo, M.carbon));
   const te = toWorld([1, 0]);
   const gurney = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.022, span), M.blackGloss);
   gurney.position.set(te[0] + 0.001, te[1] + 0.011, 0);
-  wing.add(gurney);
+  plane.add(gurney);
   // upper flap element: angle follows deploy state and airbrake
   const fChord = WING.flap, flapFoil = [];
   const fpt = ([x, y]) => [-x * fChord, -y * fChord];
@@ -1598,7 +1617,7 @@ function buildAero() {
   flapPivot.position.set(te[0] + 0.03, te[1] + 0.036, 0);
   flapPivot.add(new THREE.Mesh(extrudeXY(flapFoil, span - 0.012, 0), M.carbon));
   flapPivot.rotation.z = -0.45;
-  wing.add(flapPivot);
+  flapMount.add(flapPivot);
   BODY.flap = flapPivot;
   BODY.wingFoil = foil.map((p) => p.slice());
   BODY.flapFoil = flapFoil.map((p) => p.slice());
@@ -1607,7 +1626,9 @@ function buildAero() {
   BODY.wingPlate = [[-1.79, 1.05], [-2.20, 1.03], [-2.27, 1.10], [-2.27, 1.27], [-2.16, 1.315], [-1.88, 1.20], [-1.785, 1.11]].map(rel);
   for (const side of [-1, 1]) {
     const ep = extrudeXY(BODY.wingPlate, 0.009, side * (span / 2 + 0.0045), { bevel: 0.002 });
-    wing.add(new THREE.Mesh(ep, M.carbon));
+    plates[side] = new THREE.Group();
+    plates[side].add(new THREE.Mesh(ep, M.carbon));
+    wing.add(plates[side]);
   }
   // swan-neck pylons
   const bez = (t, p0, p1, p2, p3) => { const u = 1 - t; return [u * u * u * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t * t * t * p3[0], u * u * u * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t * t * t * p3[1]]; };
@@ -1624,9 +1645,14 @@ function buildAero() {
   }
   const pyl = left.concat(right.reverse());
   BODY.wingPylon = pyl;
-  for (const side of [-1, 1]) wing.add(new THREE.Mesh(extrudeXY(pyl, 0.016, side * WING.pylonZ, { bevel: 0.003 }), M.carbon));
+  for (const side of [-1, 1]) {
+    pylons[side] = new THREE.Group();
+    pylons[side].add(new THREE.Mesh(extrudeXY(pyl, 0.016, side * WING.pylonZ, { bevel: 0.003 }), M.carbon));
+    wing.add(pylons[side]);
+  }
   car.add(wing);
   BODY.wing = wing;
+  BODY.wingSub = { plane, flap: flapMount, plates, pylons };
   BODY.wingRel = rel;
 }
 
@@ -1646,14 +1672,14 @@ function buildExtras() {
       ring.push([X, base, -ww], [X, base, ww]);
       rings.push(ring);
     }
-    car.add(new THREE.Mesh(loftClosed(rings), M.paint));
+    car.add(part(new THREE.Mesh(loftClosed(rings), M.paint), 'scoop'));
     // the mouth
     const mouth = new THREE.Shape();
     const y0 = topY(x0) + 0.006, hm = h * 0.86 - 0.016, wm = w - 0.018;
     mouth.moveTo(wm, y0);
     for (let k = 1; k <= 20; k++) { const th = Math.PI * k / 20; mouth.lineTo(wm * Math.cos(th), y0 + hm * Math.pow(Math.sin(th), 0.8)); }
     const mg = new THREE.ShapeGeometry(mouth, 4).rotateY(Math.PI / 2).translate(x0 + 0.0015, 0, 0);
-    car.add(new THREE.Mesh(mg, M.under));
+    car.add(part(new THREE.Mesh(mg, M.under), 'scoop'));
   }
   if (FN) {
     const { x0, x1, y } = FN, top = [], bot = [];
@@ -1664,13 +1690,14 @@ function buildExtras() {
       bot.push([X, topY(X) - 0.04]);
     }
     const poly = top.concat(bot.reverse());
-    car.add(new THREE.Mesh(extrudeXY(poly, 0.012, 0, { bevel: 0.002 }), M.paint));
+    car.add(part(new THREE.Mesh(extrudeXY(poly, 0.012, 0, { bevel: 0.002 }), M.paint), 'fin'));
   }
 }
 
 function buildMirrors() {
   for (const side of [-1, 1]) {
-    const tgt = DOORS[side] ? DOORS[side].content : car;
+    const tgt = new THREE.Group();
+    if (DOORS[side]) { DOORS[side].content.add(tgt); DOORS[side].mirror = tgt; } else car.add(tgt);
     const hc = new V3(0.60, 0.905, side * 0.995);
     const housing = new THREE.SphereGeometry(1, 48, 24, Math.PI / 2, Math.PI);
     housing.scale(0.10, 0.042, 0.112);
@@ -1710,10 +1737,10 @@ function buildExhausts() {
     const tip = lathe([[0.050, -0.06], [0.064, -0.06], [0.066, -0.05], [0.066, 0.04], [0.058, 0.05], [0.052, 0.045], [0.052, -0.06]].map(([r, x]) => [r * k, x]), 64);
     tip.rotateY(Math.PI / 2);
     tip.translate(XR - 0.02, E.y, z);
-    car.add(new THREE.Mesh(tip, M.ti));
+    car.add(part(new THREE.Mesh(tip, M.ti), 'exhaust'));
     const inner = new THREE.Mesh(new THREE.CircleGeometry(0.052 * k, 40).rotateY(-Math.PI / 2), M.pipeIn);
     inner.position.set(XR + 0.02, E.y, z);
-    car.add(inner);
+    car.add(part(inner, 'exhaust'));
   }
 }
 
@@ -1765,25 +1792,25 @@ function buildLights() {
       ptsBar.push(new V3(XR - 0.004, tailTopY(z) - TL.drop - 0.035 * Math.pow(Math.abs(z) / zmax, 6), z));
     }
     const curve = new THREE.CatmullRomCurve3(ptsBar);
-    car.add(new THREE.Mesh(new THREE.TubeGeometry(curve, N * 4, 0.0075, 8, false), M.tail));
+    car.add(part(new THREE.Mesh(new THREE.TubeGeometry(curve, N * 4, 0.0075, 8, false), M.tail), 'taillight'));
     // smoked housing strip
     const sp = [], si = [];
     ptsBar.forEach((p, i) => { sp.push(p.x + 0.001, p.y + 0.024, p.z, p.x + 0.001, p.y - 0.024, p.z); if (i) { const k = i * 2; si.push(k - 2, k, k - 1, k - 1, k, k + 1); } });
     const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3)); sg.setIndex(si); sg.computeVertexNormals();
-    car.add(new THREE.Mesh(sg, M.tailHousing));
+    car.add(part(new THREE.Mesh(sg, M.tailHousing), 'taillight'));
   }
   // rain light in diffuser
   if (LS.rain) {
     const rain = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.035).rotateY(-Math.PI / 2), M.tail);
     rain.position.set(XR - 0.008, LS.rain, 0);
-    car.add(rain);
+    car.add(part(rain, 'tail'));
   }
   // rear lettering
   const lt = texOnce('rear-letters', () => wordmarkTex('HALCYON', '#ffffff', 2048, 256, 170, 'ultra-expanded'));
   if (!M.letters) M.letters = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 1, roughness: 0.18, alphaMap: lt, transparent: true, depthWrite: false, envMapIntensity: 2.2 });
   const letters = new THREE.Mesh(new THREE.PlaneGeometry(0.64, 0.08).rotateY(-Math.PI / 2), M.letters);
   letters.position.set(XR - 0.006, LS.letter, 0);
-  car.add(letters);
+  car.add(part(letters, 'tail'));
 
   // ---- headlights (decals on the nose corners) ----
   M.headE = { value: 0 };
@@ -1901,13 +1928,13 @@ function buildSpoiler() {
   const group = new THREE.Group();
   group.position.set(xLE, base + 0.004, 0);
   group.add(new THREE.Mesh(geo, M.carbon));
-  car.add(group);
+  car.add(part(group, 'spoiler'));
   const struts = [];
   for (const z of [-0.28 * span, 0.28 * span]) {
     const st = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1, 0.012), M.carbon);
     st.position.set(xLE - 0.085, base, z);
     st.scale.y = 0.001;
-    car.add(st);
+    car.add(part(st, 'spoiler'));
     struts.push(st);
   }
   BODY.spoiler = { group, struts, deckY: base, baseY: base + 0.004, prof, xLE, hAt };
@@ -1925,7 +1952,7 @@ function buildLivery() {
     const h1 = hitBody(new V3(0.28, 0.585, side * 3), new V3(0, 0, -side));
     if (h1) {
       const onDoor = door && h1.object === door.skin;
-      addDecal(h1.object, h1.point, new V3(0, 0.32, side).normalize(), new V3(0, 1, 0), 0.30, 0.30, 0.3, decalMaterial(rnd), { role: 'number', parent: onDoor ? door.content : car });
+      addDecal(h1.object, h1.point, new V3(0, 0.32, side).normalize(), new V3(0, 1, 0), 0.30, 0.30, 0.3, decalMaterial(rnd), { role: 'number', parent: onDoor ? door.outer : null });
     }
     const h2 = hitBody(new V3(0.20, 0.262, side * 3), new V3(0, 0, -side));
     if (h2) { const m = decalMaterial(wm); TINTED.push(m); addDecal(h2.object, h2.point, new V3(0, 0, side), new V3(0, 1, 0), 0.86, 0.10, 0.25, m, { role: 'word' }); }
@@ -1936,7 +1963,8 @@ function buildLivery() {
   const bhs = raycaster.intersectObject(BODY.glass, false);
   if (bhs.length) {
     const bh = bhs[0];
-    addDecal(BODY.glass, bh.point.clone().add(new V3(0.05, 0, 0)), bh.face.normal.clone(), new V3(-1, 0, 0), 1.2, 0.20, 0.25, decalMaterial(texOnce('banner', bannerTex), { clearcoat: 0, roughness: 0.2 }), { role: 'banner', order: 5 });
+    const bn = addDecal(BODY.glass, bh.point.clone().add(new V3(0.05, 0, 0)), bh.face.normal.clone(), new V3(-1, 0, 0), 1.2, 0.20, 0.25, decalMaterial(texOnce('banner', bannerTex), { clearcoat: 0, roughness: 0.2 }), { role: 'banner', order: 5 });
+    if (bn) part(bn, 'glass');
   }
   if (!M.wingText) M.wingText = new THREE.MeshStandardMaterial({ map: wm, transparent: true, depthWrite: false, roughness: 0.4 });
   const [tx, ty] = BODY.wingRel([-2.02, 1.17]);
@@ -1944,7 +1972,7 @@ function buildLivery() {
     const pl = new THREE.Mesh(new THREE.PlaneGeometry(0.30, 0.04), M.wingText);
     pl.position.set(tx, ty, side * (WING.span / 2 + 0.01));
     if (side < 0) pl.rotation.y = Math.PI;
-    BODY.wing.add(pl);
+    BODY.wingSub.plates[side].add(pl);
     DECAL_ROLES.wingText.push(pl);
   }
 }
@@ -2031,6 +2059,15 @@ const vBlur = new THREE.ShaderMaterial(VerticalBlurShader); vBlur.depthTest = fa
 const blurQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), hBlur);
 blurScene.add(blurQuad);
 
+// the patch of floor the shadow covers, as a multiple of the car's own footprint (parts laid out around it need more)
+let SHK = 1;
+function shadowScale(k) {
+  if (k === SHK) return;
+  SHK = k;
+  shadowCam.left = -SHW * k / 2; shadowCam.right = SHW * k / 2; shadowCam.top = SHD * k / 2; shadowCam.bottom = -SHD * k / 2;
+  shadowCam.updateProjectionMatrix();
+  floor.material.uniforms.uShadowScale.value.set(1 / (SHW * k), 1 / (SHD * k));
+}
 function renderContactShadow() {
   const hidden = [];
   scene.traverse((o) => { if (o.userData.noShadow && o.visible) { hidden.push(o); o.visible = false; } });
@@ -2051,7 +2088,7 @@ function renderContactShadow() {
     blurQuad.material = vBlur; vBlur.uniforms.tDiffuse.value = shadowBlurRT.texture; vBlur.uniforms.v.value = amt / 512;
     renderer.setRenderTarget(shadowRT); renderer.render(blurScene, blurCam);
   };
-  blur(3.0); blur(2.0); blur(1.2);
+  blur(3.0 / SHK); blur(2.0 / SHK); blur(1.2 / SHK);
   renderer.setRenderTarget(null);
   renderer.setClearColor(0x000000, prevClear);
 }
@@ -2159,7 +2196,7 @@ const wideScreen = () => window.innerWidth >= 900;
 const SHEET_MQ = window.matchMedia('(max-width: 899px) and (max-aspect-ratio: 5/4), (max-width: 639px)');
 const sheetLayout = () => SHEET_MQ.matches;
 const state = Object.assign({}, PRESETS[0], {
-  model: START_MODEL.id, preset: 0, doors: false, wingUp: true, lights: true, pose: 'park', view: 'front', tab: 'style',
+  model: START_MODEL.id, preset: 0, doors: false, wingUp: true, lights: true, explode: false, apart: {}, pose: 'park', view: 'front', tab: 'style',
   turntable: !reduceMotion && !window.__TEST__, panel: !window.__TEST__ && wideScreen(),
 });
 delete state.name;
@@ -2201,6 +2238,7 @@ function applyLivery() {
   if (AERO.saved) return;
   const vis = { number: st === 1 || st === 4, word: st > 0, bars: st === 1 || st === 2, banner: st > 0, wingText: st > 0 };
   for (const [role, list] of Object.entries(DECAL_ROLES)) list.forEach((m) => (m.visible = vis[role]));
+  xplSync();
   needsRender = true;
 }
 function applyWheels() {
@@ -2222,6 +2260,7 @@ function applyKit() {
   BODY.wing.visible = state.wing === 'gt';
   BODY.spoiler.group.visible = state.wing === 'active';
   BODY.spoiler.struts.forEach((s) => (s.visible = state.wing === 'active'));
+  xplRefit();
   shadowDirty = 2; needsRender = true;
 }
 function applyCabin() {
@@ -2269,7 +2308,7 @@ function poseDoors() {
   for (const s of [-1, 1]) { const D = DOORS[s]; if (D) D.pivot.quaternion.setFromAxisAngle(D.axis, D.angle * k); }
 }
 function setWingUp(up) { state.wingUp = up; needsRender = true; }
-function setPose(name) { state.pose = name; needsRender = true; }
+function setPose(name) { state.pose = name; if (name !== 'park') state.explode = false; needsRender = true; }
 function setTurntable(on) { state.turntable = on; controls.autoRotate = on; syncUI(); }
 function setPanel(open) { state.panel = open; syncUI(); }
 function setTab(tab) { state.tab = tab; syncUI(); }
@@ -2306,10 +2345,13 @@ function applyFov() {
 function viewLimits(name) {
   const inside = name === 'driver';
   controls.minDistance = inside ? 0.02 : 2.2;
-  controls.maxDistance = inside ? 0.12 : 18;
+  controls.maxDistance = inside ? 0.12 : XPL.live ? 80 : 18;
   controls.enableZoom = !inside; controls.enablePan = !inside;
   controls.maxPolarAngle = inside ? Math.PI * 0.72 : Math.PI * 0.492;
   controls.rotateSpeed = inside ? 0.45 : 1;
+  // a part held up for a closer look is turned by hand: the camera only comes closer, backs away or moves across
+  controls.enableRotate = !XPL.held;
+  if (XPL.held) { controls.minDistance = Math.max(0.12, XPL.held.r * 0.6); controls.maxDistance = Math.max(2.5, XPL.held.r * 12); }
 }
 // the part of the canvas the open panel leaves free (CSS px)
 function freeSize() {
@@ -2330,6 +2372,8 @@ function panelPull() {
 let VIEW_DX = 0;
 const OUTSIDE = { front: 1, side: 1, rear: 1, top: 1 };
 function viewTarget(name) {
+  const store = xplView(name);
+  if (store) return store;
   const [p, t] = VIEWS[name];
   const k = name === 'driver' ? 1 : (name === 'wheel' || name === 'cabin' ? 1 : framing()) * pull;
   const tv = new V3(...t), pv = new V3(...p).sub(tv).multiplyScalar(k).add(tv);
@@ -2338,26 +2382,31 @@ function viewTarget(name) {
 }
 function goView(name, dur = 1.25) {
   const from = state.view;
+  xplDrop(false);
   state.view = name;
-  if (name === 'cabin' && !state.doors) setDoors(true);
+  if (name === 'cabin' && !state.doors && !(state.explode && state.apart.doors)) setDoors(true);
   if (name === 'driver' && state.turntable) setTurntable(false);
+  if (name === 'driver') state.explode = false;
   const { p, t } = viewTarget(name);
-  const fov1 = viewFov(name, camera.aspect);
+  const inOut = (from === 'driver') !== (name === 'driver');
+  flyCamera(p, t, viewFov(name, camera.aspect), dur && inOut ? Math.max(dur, 1.6) : dur, name);
+  syncUI();
+}
+// the camera goes to p and looks at t: at once, or flying there round what it looks at; then the limits of view `name` hold
+function flyCamera(p, t, fov1, dur, name) {
   if (reduceMotion || dur === 0) {
     camAnim = null; viewLimits(name);
     camera.position.copy(p); controls.target.copy(t); camera.fov = fov1; camera.updateProjectionMatrix();
-    controls.update(); needsRender = true; syncUI(); return;
+    controls.update(); needsRender = true; return;
   }
-  // free limits while flying between the outside and the driver's seat
-  controls.minDistance = 0.02; controls.maxDistance = 18;
+  // free limits while flying between the outside and the driver's seat, or up over the parts store
+  controls.minDistance = 0.02; controls.maxDistance = 80;
   const s0 = new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target));
   const s1 = new THREE.Spherical().setFromVector3(p.clone().sub(t));
   let dth = s1.theta - s0.theta;
   while (dth > Math.PI) dth -= Math.PI * 2;
   while (dth < -Math.PI) dth += Math.PI * 2;
-  const inOut = (from === 'driver') !== (name === 'driver');
-  camAnim = { t: 0, dur: inOut ? Math.max(dur, 1.6) : dur, s0, s1, dth, t0: controls.target.clone(), t1: t, fov0: camera.fov, fov1, name };
-  syncUI();
+  camAnim = { t: 0, dur, s0, s1, dth, t0: controls.target.clone(), t1: t.clone(), fov0: camera.fov, fov1, name };
 }
 const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
 const panelEl = () => document.getElementById('panel');
@@ -2378,6 +2427,8 @@ function applyViewShift() {
 /*@include blk_flow.js*/
 
 /*@include blk_audio.js*/
+
+/*@include blk_explode.js*/
 
 /* ---------- models ---------- */
 // take a model's spec into the hard points and tables the builders, the drive model and the effects read
@@ -2405,6 +2456,7 @@ function useModel(m) {
 // everything built for one model: the sprung body's children and the four wheel pivots
 const MODEL_PIVOTS = [];
 function disposeModel() {
+  xplReset();
   const shared = new Set();
   for (const v of [...Object.values(M), ...Object.values(CAB)]) for (const m of Array.isArray(v) ? v : [v]) if (m && m.isMaterial) shared.add(m);
   const drop = (root) => root.traverse((o) => {
@@ -2479,6 +2531,7 @@ async function setModel(id) {
   if (SND.eng) SND.eng.setVoice(SPEC);
   renderPresets();
   if (state.view === 'wheel') goView('wheel', 0);
+  if (state.explode) xplPrepare();
   // at rest in the studio, wing and doors where their switches say
   updateDrive(0, clock.elapsedTime, true); updateWorld(0, true); updateAero(0, true); updateCockpit(clock.elapsedTime);
   renderContactShadow();
@@ -2546,6 +2599,7 @@ function buildUI() {
   $('#wings').innerHTML = WINGS.map((w) => radio('wing', w, 'chip', `<span>${w.name}</span>`)).join('');
   $('#kits').innerHTML = KITS.map((k) => radio('kit', k, 'chip', `<span>${k.name}</span>`)).join('');
   $('#liveries').innerHTML = LIVERIES.map((l) => radio('livery', l, 'chip tile', `${liveryIcon(l.id)}<span>${l.name}</span>`)).join('');
+  $('#mods').innerHTML = XPL_MODS.map((m) => `<button type="button" class="seg" data-mod="${m.id}" aria-pressed="false">${m.name}</button>`).join('');
   $('#cabins').innerHTML = CABINS.map((c) => radio('cabin', c, 'chip', `<span class="duo" style="background:linear-gradient(135deg, ${c.seat} 0 56%, ${c.accent} 56% 100%)"></span><span>${c.name}</span>`)).join('');
 
   const panel = panelEl();
@@ -2574,6 +2628,7 @@ function buildUI() {
     if (k === 'doors') setDoors(!state.doors);
     if (k === 'wing') setWingUp(!state.wingUp);
     if (k === 'lights') setLights(!state.lights);
+    if (k === 'explode') setExplode(!state.explode);
     if (k === 'turntable') setTurntable(!state.turntable);
     if (k === 'panel') setPanel(!state.panel);
     if (k === 'aero') setAero(!AERO.on);
@@ -2581,6 +2636,11 @@ function buildUI() {
     syncUI();
   }));
   $$('[data-pose]').forEach((b) => b.addEventListener('click', () => { if (switching) return; setPose(b.dataset.pose); syncUI(); }));
+  // a system's button fits it to the car or takes it off; pointing at it shows its bay
+  $$('[data-mod]').forEach((b) => {
+    b.addEventListener('click', () => { if (!switching) setModule(b.dataset.mod, !state.apart[b.dataset.mod]); });
+    for (const [ev, id] of [['pointerenter', b.dataset.mod], ['focus', b.dataset.mod], ['pointerleave', ''], ['blur', '']]) b.addEventListener(ev, () => { XPL.hover = id; needsRender = true; });
+  });
   $$('[data-view]').forEach((b) => b.addEventListener('click', () => { if (switching) return; setTurntable(false); goView(b.dataset.view); }));
   syncUI();
 }
@@ -2590,9 +2650,16 @@ function syncUI() {
   $$('[data-preset]').forEach((b) => b.setAttribute('aria-checked', String(+b.dataset.preset === state.preset)));
   $$('[data-tab]').forEach((b) => { b.setAttribute('aria-selected', String(b.dataset.tab === state.tab)); b.tabIndex = b.dataset.tab === state.tab ? 0 : -1; });
   $$('[data-pane]').forEach((p) => (p.hidden = p.dataset.pane !== state.tab));
-  const pressed = { doors: state.doors, wing: state.wingUp && state.wing !== 'none', lights: state.lights, turntable: state.turntable, panel: state.panel, aero: AERO.on, sound: SND.on };
+  const pressed = { doors: state.doors, wing: state.wingUp && state.wing !== 'none', lights: state.lights, explode: state.explode, turntable: state.turntable, panel: state.panel, aero: AERO.on, sound: SND.on };
   $$('[data-toggle]').forEach((b) => b.setAttribute('aria-pressed', String(!!pressed[b.dataset.toggle])));
-  const wb = $('[data-toggle="wing"]'); if (wb) wb.disabled = state.wing === 'none';
+  // the same button lays the whole car out and puts it back together
+  const xb = $('[data-toggle="explode"]'); if (xb) { const t = xb.dataset[state.explode ? 'on' : 'off']; xb.title = t; xb.setAttribute('aria-label', t); }
+  // (what lies in its bay cannot be worked)
+  const wb = $('[data-toggle="wing"]'); if (wb) wb.disabled = state.wing === 'none' || (state.explode && state.apart.aero);
+  const db = $('[data-toggle="doors"]'); if (db) db.disabled = state.explode && state.apart.doors;
+  // while the parts store is open the systems take the place of the driving programs
+  const pg = $('.poses'), mg = $('.mods'); if (pg && mg) { pg.hidden = state.explode; mg.hidden = !state.explode; }
+  $$('[data-mod]').forEach((b) => b.setAttribute('aria-pressed', String(!state.apart[b.dataset.mod])));
   $$('[data-pose]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.pose === state.pose)));
   $$('[data-view]').forEach((b) => b.setAttribute('aria-current', String(b.dataset.view === state.view)));
   document.body.classList.toggle('panel-open', state.panel);
@@ -2633,10 +2700,11 @@ async function buildModel(step, first) {
   // the flat tail: a grille, a gloss panel, or painted with a dark valance round the pipes
   const TF = SPEC.body.tail;
   BODY.cap = new THREE.Mesh(capGeo, TF.face === 'grille' ? M.tailCap : TF.face === 'gloss' ? M.tailPanel : M.paint);
-  car.add(BODY.cap);
+  car.add(part(BODY.cap, 'tail'));
   if (TF.valance) {
     const vt = texOnce('intake-valance', () => intakeTex((ctx, w, h) => roundRectPath(10, 10, w - 20, h - 20, h * 0.32)(ctx), 2048, 384, 12));
-    addDecal(BODY.cap, new V3(XR, TF.valance.y, 0), new V3(-1, 0, 0), new V3(0, 1, 0), TF.valance.w, TF.valance.h, 0.1, decalMaterial(vt, { roughness: 0.5 }));
+    const vd = addDecal(BODY.cap, new V3(XR, TF.valance.y, 0), new V3(-1, 0, 0), new V3(0, 1, 0), TF.valance.w, TF.valance.h, 0.1, decalMaterial(vt, { roughness: 0.5 }));
+    if (vd) part(vd, 'tail');
   }
   buildCanopy();
   buildDoors();
@@ -2659,6 +2727,7 @@ async function buildModel(step, first) {
       // static camber: the top of the tyre leans in
       wheel.rotation.x = -side * cam[ax.front ? 0 : 1];
       wheel.userData.spin.rotation.z = rand() * Math.PI * 2;
+      wheel.userData.side = side;
       pivot.add(wheel);
       if (ax.front) { pivot.rotation.y = 0.17; FRONT_PIVOTS.push(pivot); }
       carRoot.add(pivot);
@@ -2666,6 +2735,7 @@ async function buildModel(step, first) {
       WHEEL_OBJS.push(wheel);
     }
   }
+  buildExplode();
   await step(0.94);
 }
 
@@ -2715,6 +2785,30 @@ const size0 = () => [canvas.clientWidth || window.innerWidth, canvas.clientHeigh
 const rtOpts = { type: THREE.HalfFloatType, samples: 4 };
 const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(size0()[0] * DPR, size0()[1] * DPR, rtOpts));
 composer.addPass(new RenderPass(scene, camera));
+// a part held up for a closer look (blk_explode.js): the studio is darkened behind a veil, then the part is drawn
+// once more over it in its own light: a tent of soft boxes turned to face the camera, and lamps that shine on layer 1 only
+const heldPass = new RenderPass(scene, camera);
+heldPass.clear = false; heldPass.enabled = false;
+{
+  const veil = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ color: 0x020304, transparent: true, opacity: 0, depthTest: false, depthWrite: false }));
+  const veilScene = new THREE.Scene(), draw = heldPass.render.bind(heldPass);
+  veilScene.add(veil);
+  heldPass.render = (renderer, write, read, ...rest) => {
+    const k = ease(XPL.focus), auto = renderer.autoClear, env = scene.environment, power = scene.environmentIntensity;
+    veil.material.opacity = 0.82 * k;
+    renderer.autoClear = false;
+    renderer.setRenderTarget(read);
+    renderer.render(veilScene, blurCam);
+    renderer.autoClear = auto;
+    camera.layers.set(1);
+    scene.environment = XPL.tent; scene.environmentIntensity = lerp(0.6, 1, k);
+    scene.environmentRotation.y = Math.atan2(camera.position.x - controls.target.x, camera.position.z - controls.target.z);
+    draw(renderer, write, read, ...rest);
+    camera.layers.set(0);
+    scene.environment = env; scene.environmentIntensity = power; scene.environmentRotation.y = 0;
+  };
+}
+composer.addPass(heldPass);
 // last line of defence before bloom: no NaN or Inf may reach the blur chain
 composer.addPass(new ShaderPass({
   name: 'HdrSanitize',
@@ -2783,6 +2877,7 @@ function stepWorld(dt, snap) {
   active = updateFX(dt, t, snap) || active;
   active = updateAero(dt, snap) || active;
   active = updateDoors(dt, snap) || active;
+  active = updateExplode(dt, snap) || active;
   active = updateAeroViz(snap ? 5 : dt, t, snap) || active;
   active = updateCockpit(t) || active;
   updateHUD(t, snap);
@@ -2826,7 +2921,7 @@ function loop() {
     if (paintAnim.t >= 1) paintAnim = null;
     active = true;
   }
-  controls.autoRotate = state.turntable && !camAnim;
+  controls.autoRotate = state.turntable && !camAnim && !XPL.held;
   controls.autoRotateSpeed = 0.55;
   if (controls.update(dt)) needsRender = true;
   frameNo++;
@@ -2864,7 +2959,11 @@ window.__info = () => {
   return r;
 };
 window.__cam = () => camera.fov;
-window.__ui = { setOption, applyPreset, setDoors, setWingUp, setPose, setLights, goView, setPanel, setAero, setModel, state, DRIVE, AERO, FX, WORLD, TRACK, FLOW, MODELS, get SPEC() { return SPEC; } };
+window.__ui = { setOption, applyPreset, setDoors, setWingUp, setPose, setLights, setExplode, setModule, goView, setPanel, setAero, setModel, state, DRIVE, AERO, FX, WORLD, TRACK, FLOW, XPL, BODY, MODELS, get SPEC() { return SPEC; },
+  // a part picked up by its name, let go, and where its middle is in the picture (client px)
+  pick: (key) => xplPick(XPL.items.find((it) => it.key === key)), drop: xplDrop,
+  spot: (key) => { const it = XPL.items.find((i) => i.key === key), r = canvas.getBoundingClientRect(), v = it.c.clone().add(it.pos).project(camera); return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height]; },
+  camera, controls, get flying() { return !!camAnim; } };
 // offline render of the sound engine through a scripted drive, for automated level checks
 window.__audioTest = async (sec = 16, plan = [[0, 'park'], [3.5, 'brake'], [10, 'corner']]) => {
   const sr = 22050, ctx = new OfflineAudioContext(2, sr * sec, sr);

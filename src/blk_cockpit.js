@@ -461,12 +461,17 @@ function drawCluster() {
 function buildInterior() {
   cockpitMaterials();
   const interior = new THREE.Group();
-  const B = cockpitBatch();
+  // one batch per assembly, so each can be lifted out of the tub on its own
+  const SUB = {}, batches = [];
+  const sub = (name) => { const g = new THREE.Group(), b = cockpitBatch(); interior.add(g); SUB[name] = g; batches.push([b, g]); return b; };
   // seats
-  for (const z of [-SEAT_Z, SEAT_Z]) SEAT.build(B, z);
+  for (const z of [-SEAT_Z, SEAT_Z]) SEAT.build(sub(z < 0 ? 'seatL' : 'seatR'), z);
   // floor and tunnel
+  let B = sub('floor');
   B.add(M.jamb, new THREE.BoxGeometry(1.28, 0.006, 1.04).translate(-0.01, 0.303, 0));
   for (const z of [-SEAT_Z, SEAT_Z]) B.add(CAB.suede, new RoundedBoxGeometry(0.34, 0.006, 0.3, 2, 0.003).translate(0.43, 0.308, z));
+  const consoleB = sub('console'), dashB = sub('dash');
+  B = consoleB;
   B.add(CAB.carbon, new RoundedBoxGeometry(0.78, 0.112, 0.108, 4, 0.03).translate(-0.17, 0.356, 0));
   B.add(CAB.leather, new RoundedBoxGeometry(0.28, 0.046, 0.118, 3, 0.02).translate(-0.4, 0.425, 0));
   B.add(CAB.alu, new RoundedBoxGeometry(0.12, 0.006, 0.07, 2, 0.002).translate(0.13, 0.414, 0));
@@ -482,6 +487,7 @@ function buildInterior() {
   B.add(CAB.led, new THREE.TorusGeometry(0.0235, 0.0016, 6, 48).rotateX(Math.PI / 2).translate(0.0, 0.413, 0));
   for (const s of [-1, 1]) B.add(CAB.led, new THREE.BoxGeometry(0.58, 0.0025, 0.0025).translate(-0.08, 0.402, s * 0.055));
   // dashboard: suede top, carbon blade, lower carbon fascia
+  B = dashB;
   const bow = (z) => 0.012 * (1 - (z / 0.556) ** 2);
   {
     const prof = [[0.99, 0.612], [0.82, 0.652], [0.64, 0.664], [0.552, 0.656], [0.522, 0.632], [0.516, 0.596], [0.524, 0.566], [0.56, 0.548], [0.66, 0.524], [0.8, 0.502], [0.99, 0.5]];
@@ -533,7 +539,7 @@ function buildInterior() {
       CAB.clusterTex.colorSpace = THREE.SRGBColorSpace; CAB.clusterTex.anisotropy = 8;
     }
     const scr = new THREE.Mesh(scrGeo, new THREE.MeshBasicMaterial({ map: CAB.clusterTex, side: THREE.DoubleSide }));
-    interior.add(scr);
+    SUB.dash.add(scr);
     B.add(CAB.dark, gridGeometry(patch(40, 4, (u, v) => sp(u, v, 0.016, 0.003))));
     // visor
     B.add(CAB.carbon, gridGeometry(patch(40, 6, (u, w) => sp(u, 1, 0.03, 0).addScaledVector(Ys, 0.005 + 0.004 * Math.sin(w * Math.PI * 0.5)).addScaledVector(Dn, -0.1 * w))));
@@ -542,6 +548,7 @@ function buildInterior() {
     B.add(CAB.carbon, new RoundedBoxGeometry(0.075, 0.1, 0.305, 3, 0.02).translate(pc.x, pc.y, pc.z));
   }
   // centre stack with portrait screen, toggle bank and guarded start switch
+  B = consoleB;
   {
     const prof = [[0.64, 0.618], [0.548, 0.607], [0.505, 0.575], [0.43, 0.49], [0.335, 0.428], [0.205, 0.412], [0.205, 0.31], [0.64, 0.31]];
     B.add(CAB.carbon, extrudeXY(prof, 0.13, 0, { bevel: 0.008 }));
@@ -553,7 +560,7 @@ function buildInterior() {
     const cs = new THREE.Mesh(new THREE.PlaneGeometry(0.114, 0.094), new THREE.MeshBasicMaterial({ map: texOnce('centre-screen', centreScreenTex) }));
     cs.matrixAutoUpdate = false;
     cs.matrix.copy(basisAt(mid.clone().addScaledVector(n, 0.0139), new V3(0, 0, 1), t.clone().negate(), n));
-    interior.add(cs);
+    SUB.console.add(cs);
     const A2 = new V3(0.43, 0.49, 0), B2 = new V3(0.335, 0.428, 0);
     const t2 = B2.clone().sub(A2).normalize(), n2 = new V3(t2.y, -t2.x, 0);
     const mid2 = A2.clone().add(B2).multiplyScalar(0.5).addScaledVector(n2, 0.009);
@@ -573,12 +580,14 @@ function buildInterior() {
     }
   }
   // pedal box
+  B = sub('pedals');
   for (const [z, w, h, rest] of [[-0.44, 0.07, 0.12, true], [-0.315, 0.08, 0.095, false], [-0.225, 0.05, 0.125, false]]) {
     const mm = new THREE.Matrix4().makeRotationZ(rest ? -0.95 : -0.42).setPosition(rest ? 0.61 : 0.655, rest ? 0.338 : 0.405, z);
     B.add(CAB.aluHoles, new THREE.BoxGeometry(0.008, h, w), mm);
     if (!rest) B.add(CAB.dark, new THREE.BoxGeometry(0.012, 0.2, 0.014).translate(0.02, 0.12, 0), mm);
   }
   // rear bulkhead in quilted leather
+  B = sub('bulkhead');
   {
     const pts = [[-0.52, 0.31], [0.52, 0.31], [0.5, 0.6], [0.36, 0.64], [-0.36, 0.64], [-0.5, 0.6]];
     const g = new THREE.ShapeGeometry(new THREE.Shape(pts.map(([z, y]) => new THREE.Vector2(z, y))), 8);
@@ -590,18 +599,21 @@ function buildInterior() {
   // headliner under the roof and the rear quarters
   {
     const roofP = (u, v) => { const psi = v * 2 - 1, side = psi < 0 ? -1 : 1; return canopyPoint(lerp(CX0, XH(psi), u), Math.PI / 2 - Math.abs(psi) * (Math.PI / 2 - PHI_RAIL), side); };
+    B = sub('liner');
     B.add(CAB.suede, patchGeometry(70, 40, roofP, () => -0.012));
     for (const side of [-1, 1]) {
       const qP = (u, v) => { const phi = u * PHI_RAIL; return canopyPoint(lerp(CX0, XB(phi), v), phi, side); };
-      B.add(CAB.suede, patchGeometry(30, 40, qP, () => -0.012 * side, { flip: side < 0 }));
+      sub(side < 0 ? 'linerL' : 'linerR').add(CAB.suede, patchGeometry(30, 40, qP, () => -0.012 * side, { flip: side < 0 }));
     }
   }
   // interior mirror on the header
   B.add(CAB.dark, new RoundedBoxGeometry(0.024, 0.056, 0.2, 2, 0.01).translate(0.118, 1.0, 0));
   B.add(M.chrome, new THREE.PlaneGeometry(0.188, 0.046).rotateY(-Math.PI / 2).translate(0.105, 1.0, 0));
   B.add(CAB.dark, new THREE.CylinderGeometry(0.006, 0.008, 0.06, 12).translate(0.122, 1.05, 0));
-  B.build(interior);
-  buildSteeringWheel(interior);
+  for (const [b, g] of batches) b.build(g);
+  SUB.wheel = new THREE.Group();
+  interior.add(SUB.wheel);
+  buildSteeringWheel(SUB.wheel);
   // door cards: ambient line, pull strap, release lever
   for (const side of [-1, 1]) {
     const D = DOORS[side];
@@ -633,11 +645,11 @@ function buildInterior() {
       const xx = new V3(1, 0, 0).addScaledVector(n, -n.x).normalize(), yy = new V3().crossVectors(n, xx).normalize();
       DB.add(CAB.alu, new RoundedBoxGeometry(0.07, 0.016, 0.008, 2, 0.003), basisAt(h2.point.clone().addScaledVector(n, 0.006), xx, yy, n));
     }
-    DB.build(D.content);
+    DB.build(D.inner);
   }
   car.add(interior);
   REFL_HIDE.push(interior);
-  BODY.interior = interior;
+  BODY.interior = interior; BODY.cabin = SUB;
   drawCluster();
 }
 
