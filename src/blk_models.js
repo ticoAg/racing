@@ -96,6 +96,18 @@ const H9 = {
   },
   // body attitude: pitch and roll per g (rad), squat under load, natural frequencies (rad/s) and damping ratios
   susp: { pitch: 0.016, roll: 0.016, heave: 0.0025, wp: 11, zp: 0.38, wr: 10, zr: 0.36, wh: 14, zh: 0.42, yaw: 0.02, understeer: 0.004, bump: 1 },
+  // under the skin (blk_mech.js). engine: cylinders, V angle, cylinder pitch, front face and crank height, intake, cam
+  // cover paint. gearbox: kind and length; back: its differential behind the axle line (the half shafts sweep forward),
+  // or x0, y: the input of a transaxle on a torque tube from the engine. ev: the battery's ends and width. radiator:
+  // middle (z: one each side), size, lean and toe. susp: inboard pick-ups of the wishbones and tops of the dampers
+  // [front, rear], heights of the anti-roll bars, the rack ahead of the axle
+  mech: {
+    engine: { n: 12, v: 65, step: 0.066, x0: -0.80, yc: 0.25, intake: 'plenum', cover: '#8e0c14' },
+    gearbox: { kind: 'dct', len: 0.60, back: 0.06 },
+    ev: null,
+    radiator: { x: 2.0, y: 0.27, z: 0.46, w: 0.34, h: 0.24, lean: 0.3, yaw: 0.3 },
+    susp: { inner: [0.34, 0.34], top: [0.45, 0.47], bar: [0.2, 0.145], rack: 0.13, arms: 'carbon' },
+  },
   stance: { drop: 0, rake: 0, camber: [0, 0] },
   sparks: { pitch: -0.03, rate: 1 },
   stills: { cruise: 398, brake: 250, cruiseThrottle: 0.93 },
@@ -179,6 +191,12 @@ const G8 = mergeSpec(H9, {
     lowDrag: 260,
   },
   susp: { pitch: 0.026, roll: 0.036, heave: 0.004, wp: 8.5, zp: 0.32, wr: 8, zr: 0.30, wh: 10, zh: 0.34, yaw: 0.03, understeer: 0.007, bump: 1.3 },
+  mech: {
+    engine: { n: 8, v: 90, step: 0.105, x0: 1.58, yc: 0.26, intake: 'blower', cover: '#15171a' },
+    gearbox: { kind: 'auto', len: 0.62, back: 0, x0: -0.76, y: 0.2 },
+    radiator: { x: 2.3, y: 0.3, z: 0, w: 0.72, h: 0.26, lean: 0.25, yaw: 0 },
+    susp: { bar: [0.2, 0.135], arms: 'alloy' },
+  },
   stance: { drop: 0, rake: 0, camber: [0.012, 0.016] },
   sparks: { pitch: -1, rate: 0 },
   stills: { cruise: 333, brake: 230, cruiseThrottle: 0.9 },
@@ -254,6 +272,12 @@ const E4 = mergeSpec(H9, {
     lowDrag: 240,
   },
   susp: { pitch: 0.010, roll: 0.009, heave: 0.002, wp: 12, zp: 0.5, wr: 12, zr: 0.5, wh: 13, zh: 0.5, yaw: 0.012, understeer: 0.002, bump: 0.8 },
+  mech: {
+    engine: null, gearbox: null,
+    ev: { pack: [1.05, -0.95], width: 1.04 },
+    radiator: { x: 2.0, y: 0.22, z: 0.44, w: 0.3, h: 0.16, lean: 0.35, yaw: 0.3 },
+    susp: { inner: [0.36, 0.36], bar: [0.2, 0.165], rack: 0.19 },
+  },
   stance: { drop: 0, rake: 0, camber: [0.01, 0.012] },
   sparks: { pitch: -0.02, rate: 0.4 },
   stills: { cruise: 378, brake: 260, cruiseThrottle: 0.6 },
@@ -333,6 +357,12 @@ const R10 = mergeSpec(H9, {
     lowDrag: 240,
   },
   susp: { pitch: 0.006, roll: 0.005, heave: 0.0012, wp: 17, zp: 0.55, wr: 18, zr: 0.55, wh: 22, zh: 0.6, yaw: 0.012, understeer: 0.002, bump: 0.55 },
+  mech: {
+    engine: { n: 10, v: 90, step: 0.078, yc: 0.235, intake: 'trumpets', cover: '#c8102e' },
+    gearbox: { kind: 'seq', len: 0.5 },
+    radiator: { x: 2.04, y: 0.25, z: 0.5, w: 0.36, h: 0.22, lean: 0.35, yaw: 0.3 },
+    susp: { inner: [0.34, 0.36], bar: [0.19, 0.135] },
+  },
   stance: { drop: 0.012, rake: -0.004, camber: [0.055, 0.035] },
   sparks: { pitch: -0.012, rate: 1.6 },
   stills: { cruise: 322, brake: 255, cruiseThrottle: 0.95 },

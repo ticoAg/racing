@@ -1,9 +1,12 @@
 // Parts store: takes every model apart onto the floor, system by system, and puts it back together.
 //   test page (stills): the cut panels cover exactly the skin they replace; every part lies on the floor inside its
-//                       system's bay and no two parts overlap; a part picked up floats clear of the floor in its own
-//                       light, turns about its middle and lies as before when let go; one system can be fitted on
-//                       its own; nothing dips under the floor on the way; nothing extra is drawn once the car is whole
-//   live page (clicks): the button and the system buttons, a part picked up by a click and turned by a drag, a driving
+//                       system's bay and no two parts overlap; every part has a name, shown beside the pointer
+//                       held over it; a part picked up floats clear of the floor in its own light under its name,
+//                       turns about its middle and lies as before when let go; one system can be fitted on
+//                       its own; nothing dips under the floor on the way; nothing extra is drawn once the car is whole;
+//                       the powertrain and the suspension, which only the store shows, fit under the skin they are
+//                       built for (or in a wheel arch) and over the floor
+//   live page (clicks): the button and the system buttons, a part named under the mouse, picked up by a click and turned by a drag, a driving
 //                       program, the airflow view, a model change
 // usage: node tools/explode.js [--shots] [--stills | --pick]   (--shots saves out/store_<model>.png, out/store_ui.png and out/store_pick.png;
 //        --stills skips the clicks, --pick stops after the click that picks a part up)
@@ -75,6 +78,23 @@ const check = (ok, what) => { if (!ok) fails.push(what); return ok ? 'ok' : 'FAI
         const a = laid[i].b, b = laid[j].b, e = 1e-3;
         if (a.min.x < b.max.x - e && b.min.x < a.max.x - e && a.min.z < b.max.z - e && b.min.z < a.max.z - e) out.overlaps.push(laid[i].key + '/' + laid[j].key);
       }
+      // the mechanicals, measured where they sit on the car: under the skin and over the floor, or in a wheel arch
+      {
+        const v = new X.box.min.constructor(), ax = u.SPEC.axles, m = { parts: Object.keys(B.mechParts).length, n: 0, over: 0, under: 0, stray: 0, shown: B.mech.visible };
+        for (const g of Object.values(B.mechParts)) g.traverse((o) => {
+          if (!o.isMesh) return;
+          const p = o.geometry.attributes.position;
+          for (let i = 0; i < p.count; i++) {
+            v.fromBufferAttribute(p, i); m.n++;
+            const z = Math.abs(v.z), top = u.skinTop(v.x, z);
+            if (top < 0) { if (!ax.some((a) => Math.abs(v.x - a.x) < a.Ra && v.y < a.yc + a.Ra)) m.stray++; continue; }
+            m.over = Math.max(m.over, v.y - top);
+            if (z < 0.58) m.under = Math.max(m.under, u.floorAt(v.x) - v.y);
+          }
+        });
+        m.over = +m.over.toFixed(4); m.under = +m.under.toFixed(4);
+        out.mech = m;
+      }
       // parts with no place are the ones not fitted to this car (the other wing, the track kit)
       out.unplaced = X.items.filter((it) => !it.at).map((it) => it.key);
       const decals = B.shell.children.filter((o) => o !== B.skin);
@@ -85,6 +105,16 @@ const check = (ok, what) => { if (!ok) fails.push(what); return ok ? 'ok' : 'FAI
       });
       u.goView('front', 0);
       out.png = window.__grab();
+      // every part has a name; the pointer over a part: its name beside it and a hand; over the bare studio: neither
+      {
+        const tip = document.getElementById('tip'), [x, y] = u.spot('bonnet');
+        out.unnamed = X.items.filter((it) => it.at && !/^[\u4e00-\u9fffA]{2,}$/.test(u.nameOf(it.key))).map((it) => it.key);
+        u.point(x, y); window.__renderNow();
+        const r = tip.getBoundingClientRect();
+        out.hover = { name: tip.hidden ? '' : tip.textContent, want: u.nameOf('bonnet'), near: r.left > x && r.left - x < 40 && r.top > y && r.top - y < 60, hand: document.getElementById('scene').style.cursor === 'pointer' };
+        u.point(4, 4); window.__renderNow();
+        out.hover.off = tip.hidden && document.getElementById('scene').style.cursor === '';
+      }
       // a part picked up: clear of the floor, in the light, the camera on it; turned: still there; let go: as before
       {
         const V = X.box.min.constructor, of = (key) => boxes().find((p) => p.key === key).b, same = (a, b) => a.min.distanceTo(b.min) + a.max.distanceTo(b.max) < 1e-4;
@@ -94,14 +124,17 @@ const check = (ok, what) => { if (!ok) fails.push(what); return ok ? 'ok' : 'FAI
         const lit = it.objs.every((j) => (j.o.layers.mask & 2) === 2), near = u.controls.target.distanceTo(mid) < 0.25 * it.r + 0.05;
         it.q.setFromAxisAngle(new V(0.3, 1, 0.2).normalize(), 2); X.turned = true; window.__renderNow();
         const turned = of('tyre1'), stays = turned.getCenter(new V()).distanceTo(mid) < 5e-3 && Math.abs(turned.max.x - turned.min.x - (up.max.x - up.min.x)) > 0.02;
-        out.pick = { held: it.key, clear: +up.min.y.toFixed(2), lit, near, stays, alone: same(of('seat+'), other), hand: !u.controls.enableRotate, focus: X.focus };
+        const tip = document.getElementById('tip');
+        out.pick = { held: it.key, clear: +up.min.y.toFixed(2), lit, near, stays, alone: same(of('seat+'), other), hand: !u.controls.enableRotate, focus: X.focus, named: !tip.hidden && tip.textContent === u.nameOf('tyre1') && tip.classList.contains('is-held') };
         u.drop(); window.__renderNow();
-        out.put = { down: same(of('tyre1'), lay), unlit: it.objs.every((j) => (j.o.layers.mask & 2) === 0), camera: u.camera.position.distanceTo(cam) < 1e-3, free: u.controls.enableRotate && !X.held && X.focus === 0 };
+        out.put = { unnamed: tip.hidden, down: same(of('tyre1'), lay), unlit: it.objs.every((j) => (j.o.layers.mask & 2) === 0), camera: u.camera.position.distanceTo(cam) < 1e-3, free: u.controls.enableRotate && !X.held && X.focus === 0 };
       }
       // one system back onto the car, the others stay where they are
       u.setModule('wheels', false); window.__renderNow();
       out.one = home('wheels') && !home('body') && !home('cabin') && X.any;
-      u.setModule('wheels', true); window.__renderNow();
+      u.setModule('wheels', true); u.setModule('power', false); window.__renderNow();
+      out.one = out.one && home('power') && !home('wheels') && !home('susp') && B.mech.visible;
+      u.setModule('power', true); window.__renderNow();
       // half way there: nothing under the floor
       X.hold = 0.5; window.__renderNow();
       out.dip = +Math.min(...boxes().map((p) => p.b.min.y)).toFixed(4);
@@ -110,7 +143,7 @@ const check = (ok, what) => { if (!ok) fails.push(what); return ok ? 'ok' : 'FAI
       u.setExplode(false); window.__renderNow();
       // (a cambered tyre stands a few millimetres in the floor on the car itself)
       out.rest = +Math.min(...boxes().map((p) => p.b.min.y)).toFixed(4);
-      Object.assign(out, { back: home(), shellBack: B.shell.visible, twinsOff: X.twins.every((t) => !t.visible), panelsOff: X.panels.every((h) => !h.visible), linesOff: !X.floor.visible, calls0, calls2: window.__info().calls });
+      Object.assign(out, { back: home(), shellBack: B.shell.visible, twinsOff: X.twins.every((t) => !t.visible), panelsOff: X.panels.every((h) => !h.visible), linesOff: !X.floor.visible, mechOff: !B.mech.visible, calls0, calls2: window.__info().calls });
       const t0 = performance.now();
       u.setExplode(true); window.__renderNow();
       out.ms = Math.round(performance.now() - t0);
@@ -123,14 +156,16 @@ const check = (ok, what) => { if (!ok) fails.push(what); return ok ? 'ok' : 'FAI
     console.log(id, JSON.stringify(r));
     console.log('  panels cover the skin:', check(Math.abs(r.panels - r.skin) < 1e-3 * r.skin && r.nPanels === 7, id + ' panel area'),
       '| lettering cut with them:', check(Math.abs(r.pieces - r.decals) < 1e-3 * Math.max(r.decals, 1e-6), id + ' decal area'),
-      '| on the floor:', check(r.laid > 55 && r.bays === 7 && r.floor[0] > 0.005 && r.floor[1] < 0.03 && r.shellHidden, id + ' on the floor'),
+      '| on the floor:', check(r.laid > 80 && r.bays === 9 && r.floor[0] > 0.005 && r.floor[1] < 0.03 && r.shellHidden, id + ' on the floor'),
+      '| mechanicals under the skin:', check(r.mech.parts >= 28 && r.mech.shown && r.mech.over < 1e-3 && r.mech.under < 1e-3 && r.mech.stray === 0, id + ' mechanicals: ' + JSON.stringify(r.mech)),
       '| each in its bay:', check(r.astray.length === 0, id + ' astray: ' + r.astray),
+      '| named:', check(r.unnamed.length === 0 && r.hover.name === r.hover.want && r.hover.near && r.hover.hand && r.hover.off, id + ' names: ' + r.unnamed + ' ' + JSON.stringify(r.hover)),
       '| none overlap:', check(r.overlaps.length === 0, id + ' overlaps: ' + r.overlaps),
-      '| picked up:', check(r.pick.held === 'tyre1' && r.pick.clear > 0.5 && r.pick.lit && r.pick.near && r.pick.stays && r.pick.alone && r.pick.hand && r.pick.focus === 1, id + ' pick'),
-      '| let go:', check(r.put.down && r.put.unlit && r.put.camera && r.put.free, id + ' drop'),
+      '| picked up:', check(r.pick.held === 'tyre1' && r.pick.clear > 0.5 && r.pick.lit && r.pick.near && r.pick.stays && r.pick.alone && r.pick.hand && r.pick.focus === 1 && r.pick.named, id + ' pick'),
+      '| let go:', check(r.put.down && r.put.unlit && r.put.camera && r.put.free && r.put.unnamed, id + ' drop'),
       '| one system alone:', check(r.one, id + ' single system'),
       '| above the floor on the way:', check(r.dip > Math.min(0, r.rest) - 1e-3, id + ' dips'),
-      '| all back:', check(r.back && r.shellBack && r.twinsOff && r.panelsOff && r.linesOff && r.calls2 === r.calls0, id + ' back'));
+      '| all back:', check(r.back && r.shellBack && r.twinsOff && r.panelsOff && r.linesOff && r.mechOff && r.calls2 === r.calls0, id + ' back'));
   }
   await page.close();
   if (process.argv.includes('--stills')) { await browser.close(); server.close(); if (fails.length) { console.error('FAILED:', fails.join('; ')); process.exit(1); } console.log('stills ok'); return; }
@@ -154,10 +189,14 @@ const check = (ok, what) => { if (!ok) fails.push(what); return ok ? 'ok' : 'FAI
   console.log('button:', JSON.stringify(s), check(s.explode && s.live && s.pressed === 'true' && s.title === '组合' && s.buttons && !s.programs && s.fitted === '', 'button lays the car out'));
   // a click on a part picks it up, a drag turns it, Escape lets it go
   const [bx, by] = await page.evaluate(() => window.__ui.spot('bonnet'));
+  await page.mouse.move(bx, by, { steps: 3 });
+  await page.waitForFunction(() => !document.getElementById('tip').hidden, null, { timeout: 400000, polling: 250 });
+  const tip = await page.evaluate(() => { const t = document.getElementById('tip'), r = t.getBoundingClientRect(); return { text: t.textContent, want: window.__ui.nameOf('bonnet'), x: Math.round(r.left), y: Math.round(r.top), held: t.classList.contains('is-held') }; });
+  console.log('named:', JSON.stringify(tip), check(tip.text === tip.want && !tip.held && tip.x > bx && tip.x - bx < 40 && tip.y > by && tip.y - by < 60, 'the mouse over a part shows its name'));
   await page.mouse.click(bx, by);
   // (up in the air, and the camera has arrived)
   await page.waitForFunction(() => window.__ui.XPL.focus === 1 && !window.__ui.flying, null, { timeout: 400000, polling: 250 });
-  const got = await page.evaluate(() => { const u = window.__ui; return { key: u.XPL.held && u.XPL.held.key, hand: !u.controls.enableRotate, cam: u.camera.position.toArray() }; });
+  const got = await page.evaluate(() => { const u = window.__ui, t = document.getElementById('tip'); return { key: u.XPL.held && u.XPL.held.key, hand: !u.controls.enableRotate, cam: u.camera.position.toArray(), named: !t.hidden && t.textContent === u.nameOf('bonnet') && t.classList.contains('is-held') }; });
   // (the camera stays where it is: the turntable's last drift dying away is millimetres, an orbit by this drag would be metres)
   const [w2, h2] = [480, 200];
   await page.mouse.move(w2, h2); await page.mouse.down(); await page.mouse.move(w2 + 60, h2 + 25, { steps: 6 }); await page.mouse.up();
@@ -166,15 +205,15 @@ const check = (ok, what) => { if (!ok) fails.push(what); return ok ? 'ok' : 'FAI
   if (shots) await page.screenshot({ path: path.join(root, 'out', 'store_pick.png'), timeout: 120000 });
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => window.__ui.XPL.focus === 0 && !window.__ui.XPL.held, null, { timeout: 400000, polling: 250 });
-  console.log('picked up:', JSON.stringify(got.key), JSON.stringify(turned), check(got.key === 'bonnet' && got.hand && turned.still && turned.w < 0.999 && turned.moved < 0.05, 'a click picks a part up and a drag turns it'));
+  console.log('picked up:', JSON.stringify(got.key), JSON.stringify(turned), check(got.key === 'bonnet' && got.hand && got.named && turned.still && turned.w < 0.999 && turned.moved < 0.05, 'a click picks a part up and a drag turns it'));
   if (process.argv.includes('--pick')) { await browser.close(); server.close(); if (fails.length) { console.error('FAILED:', fails.join('; ')); process.exit(1); } console.log('pick ok'); return; }
   // one system fitted, then taken off again
-  await page.click('[data-mod="wheels"]');
-  await page.waitForFunction(() => window.__ui.XPL.mods.wheels.k === 0, null, { timeout: 400000, polling: 250 });
+  await page.click('[data-mod="power"]');
+  await page.waitForFunction(() => window.__ui.XPL.mods.power.k === 0, null, { timeout: 400000, polling: 250 });
   s = await st();
-  const fitted = s.fitted === 'wheels' && s.any && s.k === '1 1 1 1 1 0 1';
+  const fitted = s.fitted === 'power' && s.any && s.k === '1 1 1 1 1 1 1 1 0';
   if (shots) await page.screenshot({ path: path.join(root, 'out', 'store_ui.png'), timeout: 120000 });
-  await page.click('[data-mod="wheels"]'); await allOut();
+  await page.click('[data-mod="power"]'); await allOut();
   s = await st();
   console.log('one system:', JSON.stringify(s), check(fitted && s.fitted === '', 'a system is fitted and taken off on its own'));
   // everything back with one click; then a driving program

@@ -1,19 +1,21 @@
 /* =========================================================================
    PARTS STORE — the parked car is taken apart and its parts are set out on
    the studio floor around the bare tub, sorted by system: body, doors,
-   canopy, aero, cabin, wheels, tail. Every system has a bay; each goes back
-   onto the car on its own, or all of them at once.
+   canopy, aero, cabin, wheels, tail, suspension, powertrain. Every system
+   has a bay; each goes back onto the car on its own, or all of them at once.
    Every builder names its parts (part()); here each name belongs to a system
    and has a place in that system's bay. The bays are packed from the parts'
    own sizes, so they suit every model and configuration. The skin is one
    lofted mesh: the first time it is needed it is cut along the shut lines the
    paint already shows (bonnet, engine cover, the four fenders, the tub in
    between), with whatever is laid onto it (lights, vents, lettering) cut the
-   same way. Surfaces that are only ever seen from one side get an inner face
-   while parts are off the car.
+   same way. The powertrain and the suspension (blk_mech.js) are under the
+   skin: they are only drawn while the store is open. Surfaces that are only
+   ever seen from one side get an inner face while parts are off the car.
    Any part can be picked up for a closer look: it rises to eye level, the
    camera comes in, the studio dims around it, and dragging turns the part
-   itself, so that every side of it can be brought into the light.
+   itself, so that every side of it can be brought into the light. The part
+   under the pointer, and the one held up, is named.
    ========================================================================= */
 // the systems, in the order of their buttons. list: the parts of a bay row by row ("/" starts a new row; + and - are
 // the car's right and left side, a digit is the wheel). Rows run away from the car unless they run along it; gap is the
@@ -26,11 +28,32 @@ const XPL_MODS = [
   { id: 'cabin', name: '内饰', list: 'pedals steer / dash / seat- console seat+ / bulkhead' },
   { id: 'wheels', name: '轮组', gap: 0.3, list: [0, 1, 2, 3].map((n) => ['upright', 'brake', 'disc', 'rim', 'tyre', 'lock'].map((p) => p + n).join(' ')).join(' / ') },
   { id: 'tail', name: '尾部', along: true, list: 'tail / taillight / exhaust' },
+  { id: 'susp', name: '悬挂', along: true, list: 'lower0 lower1 lower2 lower3 / upper0 upper1 upper2 upper3 / coil0 coil1 coil2 coil3 / barF / rack / barR' },
+  { id: 'power', name: '动力', along: true, list: 'head+ intake head- / manifold+ engine manifold- / pipe+ propshaft gearbox pipe- / inverterF motor0 gearF motor1 / battery / inverterR motor2 gearR motor3 / shaft0 shaft1 shaft2 shaft3 / radiator+ shaft+ shaft- radiator radiator-' },
 ];
-// where the bays lie: in a band beside the car to its left and to its right (front to rear), and behind it
-const XPL_BANDS = { L: ['aero', 'body', 'canopy'], R: ['wheels', 'cabin', 'doors'], B: ['tail'] };
+// where the bays lie: in a band beside the car to its left and to its right (front to rear), and one behind the other
+// off its tail and off its nose, between those bands
+const XPL_BANDS = { L: ['aero', 'body', 'canopy'], R: ['wheels', 'cabin', 'doors'], B: ['tail', 'susp'], F: ['power'] };
 const XPL_OF = {};
 for (const m of XPL_MODS) { m.rows = m.list.split(' / ').map((r) => r.split(' ')); for (const k of m.rows.flat()) XPL_OF[k] = m.id; }
+// what the parts are called: by the name without its end, side or corner, which go in front of it
+const XPL_NAMES = {
+  bonnet: () => (SPEC.mech.engine && SPEC.mech.engine.x0 > 0 ? '发动机盖' : '前盖'), deck: () => (SPEC.mech.engine && SPEC.mech.engine.x0 < 0 ? '发动机盖' : '后盖'), fender: '翼子板',
+  doorOuter: '车门外板', doorTrim: '车门内饰板', doorGlass: '车窗玻璃', mirror: '后视镜',
+  glass: '风挡玻璃', pillar: 'A柱', roof: '车顶', quarter: '后侧窗', scoop: '车顶进气口',
+  splitter: '前分流器', fence: '导流片', canard: '鸭翼', skirt: '侧裙', diffuser: '扩散器', plane: '尾翼主翼', flap: '尾翼襟翼', plate: '尾翼端板', pylon: '尾翼支架', spoiler: '扰流板', fin: '鲨鱼鳍',
+  seat: '座椅', dash: '仪表台', steer: '方向盘', console: '中控台', pedals: '踏板', bulkhead: '后隔板',
+  upright: '立柱', brake: '制动卡钳', disc: '制动盘', rim: '轮毂', tyre: '轮胎', lock: '中央锁止螺母',
+  tail: '尾板', taillight: '尾灯', exhaust: '排气尾嘴',
+  lower: '下叉臂', upper: '上叉臂', coil: '避震器', bar: '防倾杆', rack: '转向机',
+  engine: '缸体', head: '气缸盖', intake: () => ({ plenum: '进气歧管', trumpets: '进气喇叭口', blower: '机械增压器' })[SPEC.mech.engine.intake], manifold: '排气歧管', pipe: '排气管',
+  gearbox: '变速箱', propshaft: '扭力管', shaft: '半轴', radiator: '散热器', motor: '电机', gear: '减速器', inverter: '逆变器', battery: '电池组',
+};
+const XPL_CORNER = ['左前', '右前', '左后', '右后'];
+function xplName(key) {
+  const [, base, end, side] = key.match(/^(.*?)([FR])?([+-]|\d)?$/), name = XPL_NAMES[base];
+  return (side === '+' ? '右' : side === '-' ? '左' : side ? XPL_CORNER[side] : '') + (end === 'F' ? '前' : end === 'R' ? '后' : '') + (typeof name === 'function' ? name() : name);
+}
 const XPL_OUT = 1.9, XPL_IN = 1.6;      // seconds for a system to be laid out and to be fitted again
 const XPL_SPAN = 0.5;                   // share of that time one part is on the move
 const XPL_GAP = 0.15, XPL_ROW = 0.22;   // floor between parts in a row, between rows (m)
@@ -40,8 +63,10 @@ const XPL_EDGE = 0.17;                  // a bay's outline stands this far off i
 // mods: per system { k: 0 on the car .. 1 in its bay }. reg: what can move. items: the parts with their places.
 // panels, twins and pieces only exist once parts have been off the car. hold: how far out the parts go (stills of the flight).
 // held: the part picked up for a closer look; back: where the camera was before; focus: how far up the part in the air is.
-const XPL = { hold: 1, held: null, back: null, focus: 0, turned: false, lamps: null, tent: null, live: false, any: false, mods: {}, reg: [], items: [], bays: {}, box: null, floor: null, fade: 0, hover: '', shadow: 1, ready: false, panels: [], twins: [], pieces: [] };
+// named: the part whose name is shown.
+const XPL = { named: null, hold: 1, held: null, back: null, focus: 0, turned: false, lamps: null, tent: null, live: false, any: false, mods: {}, reg: [], items: [], bays: {}, box: null, floor: null, fade: 0, hover: '', shadow: 1, ready: false, panels: [], twins: [], pieces: [] };
 for (const m of XPL_MODS) XPL.mods[m.id] = { k: 0, wait: 0, hot: 0 };
+const XPL_TIP = document.getElementById('tip');
 
 const xplKey = (name, side = 0) => name + (side > 0 ? '+' : side < 0 ? '-' : '');
 function xplAdd(o, key, panel = false) {
@@ -57,6 +82,7 @@ function xplReset() {
   for (const m of XPL_MODS) Object.assign(XPL.mods[m.id], { k: 0, wait: 0, hot: 0 });
   Object.assign(XPL, { held: null, back: null, focus: 0, live: false, any: false, reg: [], items: [], bays: {}, box: null, fade: 0, shadow: 1, ready: false, panels: [], twins: [], pieces: [] });
   heldPass.enabled = false; controls.enableRotate = true; canvas.style.cursor = '';
+  xplTip(null);
   if (XPL.lamps) xplLamps(null, 0);
   xplFloorOff();
   if (BODY.shell) BODY.shell.visible = true;
@@ -86,6 +112,7 @@ function buildExplode() {
   xplAdd(C.pedals, 'pedals'); xplAdd(C.bulkhead, 'bulkhead');
   // the headlining goes with the roof and the rear quarters it lines
   xplAdd(C.liner, 'roof'); xplAdd(C.linerL, 'quarter-'); xplAdd(C.linerR, 'quarter+');
+  for (const [key, g] of Object.entries(BODY.mechParts)) xplAdd(g, key);
   WHEEL_OBJS.forEach((w, n) => { for (const k of ['tyre', 'rim', 'lock', 'disc', 'brake', 'upright']) xplAdd(w.userData.sub[k], k + n); });
 }
 
@@ -94,7 +121,10 @@ function buildExplode() {
 const XPL_PANELS = ['tub', 'bonnet', 'fenderF+', 'fenderF-', 'deck', 'fenderR+', 'fenderR-'];
 function xplCutter() {
   const [hx, hz] = SPEC.body.seams.hood, [dx, dz] = SPEC.body.seams.deck;
-  const region = (x, z) => (x >= hx ? (z >= hz ? 2 : z <= -hz ? 3 : 1) : x <= dx ? (z >= dz ? 5 : z <= -dz ? 6 : 4) : 0);
+  // an engine behind the cabin lies ahead of the engine cover's shut line, under the tail of the canopy: there the
+  // cover comes off from the bulkhead back
+  const E = SPEC.mech.engine, bx = E && E.x0 < 0 ? WX0 - 0.02 : dx;
+  const region = (x, z) => (x >= hx ? (z >= hz ? 2 : z <= -hz ? 3 : 1) : x <= dx ? (z >= dz ? 5 : z <= -dz ? 6 : 4) : x <= bx && Math.abs(z) < dz ? 4 : 0);
   const across = (poly, w, mid, right, left, out) => {
     if (poly.length < 3) return;
     const fr = (p) => p[2] - w, fl = (p) => -p[2] - w;
@@ -105,12 +135,13 @@ function xplCutter() {
   };
   // a triangle that crosses a shut line: the piece on each side of it
   const pieces = (poly, out) => {
-    const ff = (p) => p[0] - hx, fd = (p) => dx - p[0];
+    const ff = (p) => p[0] - hx, fd = (p) => dx - p[0], fb = (p) => bx - p[0];
     const rest = clipBy(poly, ff, -1);
     across(clipBy(poly, ff, 1), hz, 1, 2, 3, out);
     across(clipBy(rest, fd, 1), dz, 4, 5, 6, out);
-    const mid = clipBy(rest, fd, -1);
-    if (mid.length >= 3) out.push([0, mid]);
+    const mid = clipBy(rest, fd, -1), tub = bx > dx ? clipBy(mid, fb, -1) : mid;
+    if (bx > dx) across(clipBy(mid, fb, 1), dz, 4, 0, 0, out);
+    if (tub.length >= 3) out.push([0, tub]);
   };
   return { region, pieces };
 }
@@ -245,6 +276,7 @@ function xplPrepare() {
 function xplSync() {
   if (!XPL.ready) return;
   BODY.shell.visible = !XPL.any;
+  BODY.mech.visible = XPL.live || XPL.any;
   for (const h of XPL.panels) h.visible = XPL.any;
   for (const t of XPL.twins) t.visible = XPL.any;
   for (const [m, d] of XPL.pieces) m.visible = d.visible;
@@ -302,7 +334,7 @@ function xplLayout() {
   // each bay packed on its own: a along its band, b away from the car
   const packed = {};
   for (const m of XPL_MODS) {
-    const beside = !XPL_BANDS.B.includes(m.id), size = new Map();
+    const beside = XPL_BANDS.L.includes(m.id) || XPL_BANDS.R.includes(m.id), size = new Map();
     for (const it of XPL.items) {
       if (it.mod !== m.id || it.box.isEmpty()) continue;
       const dx = it.box.max.x - it.box.min.x, dz = it.box.max.z - it.box.min.z, a = beside ? dx : dz, b = beside ? dz : dx;
@@ -313,17 +345,18 @@ function xplLayout() {
     const P = xplPack(rows, size, m.gap || XPL_GAP);
     packed[m.id] = { A: m.along ? P.U : P.V, B: m.along ? P.V : P.U, slots: P.slots, along: m.along, order: rows.flat() };
   }
-  // the bands: beside the car front to rear, centred on it; behind it, centred on its middle
-  const cx = (XF + XR) / 2, zin = Math.max(BC.a(0.9), BC.a(-1.3)) + 0.12 + XPL_AISLE, xin = XR - XPL_AISLE;
+  // the bands: beside the car front to rear, centred on it; off its tail and off its nose one bay behind the other,
+  // each centred on the car's middle
+  const cx = (XF + XR) / 2, zin = Math.max(BC.a(0.9), BC.a(-1.3)) + 0.12 + XPL_AISLE, xin = XR - XPL_AISLE, xout = XF + XPL_AISLE;
   XPL.bays = {};
   XPL.box = new THREE.Box3(new V3(XR - 0.1, 0, -1.15), new V3(XF + 0.15, 0.55, 1.15));
   for (const [band, ids] of Object.entries(XPL_BANDS)) {
-    const list = ids.filter((id) => packed[id]), sgn = band === 'L' ? -1 : 1;
-    let a0 = -(list.reduce((s, id) => s + packed[id].A, 0) + XPL_BAY * (list.length - 1)) / 2;
+    const list = ids.filter((id) => packed[id]), sgn = band === 'L' ? -1 : 1, end = band === 'B' || band === 'F';
+    let a0 = -(list.reduce((s, id) => s + packed[id].A, 0) + XPL_BAY * (list.length - 1)) / 2, b0 = 0;
     for (const id of list) {
-      const Z = packed[id], a00 = a0;
+      const Z = packed[id], a00 = end ? -Z.A / 2 : a0, b00 = b0;
       // bay coordinates to the floor
-      const at = band === 'B' ? (a, b) => [xin - b, a00 + a] : (a, b) => [cx - (a00 + a), sgn * (zin + b)];
+      const at = band === 'B' ? (a, b) => [xin - b00 - b, a00 + a] : band === 'F' ? (a, b) => [xout + b00 + b, a00 + a] : (a, b) => [cx - (a00 + a), sgn * (zin + b)];
       const p = at(0, 0), q = at(Z.A, Z.B), e = XPL_EDGE;
       const bay = XPL.bays[id] = { x0: Math.min(p[0], q[0]) - e, x1: Math.max(p[0], q[0]) + e, z0: Math.min(p[1], q[1]) - e, z1: Math.max(p[1], q[1]) + e, band, line: null };
       XPL.box.expandByPoint(_xp.set(bay.x0, 0, bay.z0)).expandByPoint(_xp.set(bay.x1, 0, bay.z1));
@@ -338,7 +371,7 @@ function xplLayout() {
           j.d.copy(it.at).applyMatrix3(_xm); j.up.copy(UP).applyMatrix3(_xm);
         }
       });
-      a0 += Z.A + XPL_BAY;
+      if (end) b0 += Z.B + XPL_BAY; else a0 += Z.A + XPL_BAY;
     }
   }
   for (const [o, q] of keep) o.quaternion.copy(q);
@@ -429,9 +462,11 @@ function xplOpen(live) {
   XPL_MODS.forEach((m, i) => { XPL.mods[m.id].wait = (live ? i : n - 1 - i) * 0.1; });
   if (live) {
     xplPrepare();
+    xplSync();
     xplLayout();
     if (state.doors && state.apart.doors) setDoors(false);
-  } else canvas.style.cursor = '';
+  } else { xplSync(); canvas.style.cursor = ''; }
+  XPL_PTR.stale = true;
   if (state.view !== 'driver') goView(state.view, window.__TEST__ ? 0 : 1.7);
 }
 // a change of kit or wing while the store is open: the bays are packed again
@@ -469,6 +504,23 @@ function updateExplode(dt, snap = false) {
     if (any !== XPL.any) { XPL.any = any; xplSync(); }
     xplPose();
     shadowDirty = Math.max(shadowDirty, 2);
+  }
+  // the name of the part held up, or of the one the pointer is over: looked up again when the pointer, the camera
+  // or the parts have moved (a look-up may take a few milliseconds over the large panels: no more often than a
+  // quarter of the time goes to it), and not while the camera flies or a drag turns it
+  const P = XPL_PTR;
+  if (moved) P.stale = true;
+  if (XPL.held) xplTip(XPL.held);
+  else if (P.stale) {
+    const busy = !!camAnim || P.ids.size > 0, now = performance.now();
+    if (busy || !live || !P.over) { xplTip(null); canvas.style.cursor = ''; P.stale = busy; }
+    else if (snap || now - P.seen > Math.max(40, 4 * P.cost)) {
+      P.stale = false;
+      const it = xplAt(P.hx, P.hy);
+      P.seen = performance.now(); P.cost = P.seen - now;
+      canvas.style.cursor = it ? 'pointer' : '';
+      xplTip(it, P.hx, P.hy);
+    }
   }
   // the bay outlines: there while the store is open, brighter for the system that is moving or pointed at
   if (XPL.floor) {
@@ -530,8 +582,9 @@ function xplFree() {
 /* ---------- a part picked up ---------- */
 const xplMeshes = (o, out) => { if (!o.visible) return; if (o.isMesh) out.push(o); for (const c of o.children) xplMeshes(c, out); };
 const _xray = new THREE.Raycaster(), _xn = new THREE.Vector2(), _xball = new THREE.Sphere();
-// the part under a point of the picture (client px): the nearest box for the pointer, the nearest surface for a click
-function xplUnder(x, y, exact) {
+// the part under a point of the picture (client px): the nearest box, or the nearest surface (slender: of the parts
+// with few triangles only, which is what the thin ones are; the others are slow to try)
+function xplUnder(x, y, exact, slender = false) {
   const r = canvas.getBoundingClientRect();
   _xray.setFromCamera(_xn.set((x - r.left) / r.width * 2 - 1, 1 - (y - r.top) / r.height * 2), camera);
   const ray = _xray.ray, near = [];
@@ -547,10 +600,28 @@ function xplUnder(x, y, exact) {
     if (d > at) break;
     const meshes = [];
     for (const j of it.objs) xplMeshes(j.o, meshes);
+    if (slender && (it.tris || (it.tris = meshes.reduce((n, m) => n + (m.geometry.index || m.geometry.attributes.position).count / 3, 0))) > 6000) continue;
     const hit = _xray.intersectObjects(meshes, false)[0];
     if (hit && hit.distance < at) { at = hit.distance; best = it; }
   }
   return best;
+}
+// the part at the pointer: the one whose surface is under it, or within a few pixels of it (a bar, a rod, a spring
+// are thin)
+function xplAt(x, y) {
+  let it = xplUnder(x, y, true);
+  for (let k = 0; !it && k < 4; k++) it = xplUnder(x + [5, -5, 0, 0][k], y + [0, 0, 5, -5][k], true, true);
+  return it;
+}
+// its name: beside the pointer, inside the window; for the part held up, in a place of its own (set in the styles)
+function xplTip(it, x = 0, y = 0) {
+  const T = XPL_TIP, held = !!it && it === XPL.held;
+  if (held && it === XPL.named && T.classList.contains('is-held')) return;
+  if (it !== XPL.named) { XPL.named = it; T.textContent = it ? xplName(it.key) : ''; T.hidden = !it; }
+  T.classList.toggle('is-held', held);
+  if (!it || held) { T.style.transform = ''; return; }
+  const w = T.offsetWidth, h = T.offsetHeight;
+  T.style.transform = `translate(${Math.round(clamp(x + 14, 8, innerWidth - w - 8))}px, ${Math.round(y + 22 + h > innerHeight - 8 ? y - h - 12 : y + 22)}px)`;
 }
 // picked up: it rises above where it lies and the camera comes in a little above it, from the side it was looking from
 function xplPick(it) {
@@ -576,23 +647,29 @@ function xplPick(it) {
 function xplDrop(fly = true) {
   if (!XPL.held) return;
   XPL.held = null;
+  XPL_PTR.stale = true;
   controls.enableRotate = true;
   if (fly && XPL.back) flyCamera(XPL.back.p, XPL.back.t, viewFov(state.view, camera.aspect), window.__TEST__ ? 0 : 1.0, state.view);
   XPL.back = null;
   needsRender = true;
 }
 // the pointer: a click picks a part up (or, beside it, lets it go); a drag turns the part that is held
-const XPL_PTR = { ids: new Set(), x: 0, y: 0, x0: 0, y0: 0, t0: 0, far: false };
+// (over, hx, hy: a pointer that hovers is over the picture, and where; stale: what it is over has to be looked up
+// again; seen, cost: when it last was, and how long that took)
+const XPL_PTR = { ids: new Set(), x: 0, y: 0, x0: 0, y0: 0, t0: 0, far: false, over: false, hx: 0, hy: 0, stale: false, seen: 0, cost: 0 };
 canvas.addEventListener('pointerdown', (e) => {
   const P = XPL_PTR;
-  P.ids.add(e.pointerId);
+  P.ids.add(e.pointerId); P.stale = true;
   P.x = P.x0 = e.clientX; P.y = P.y0 = e.clientY; P.t0 = performance.now(); P.far = P.ids.size > 1;
 });
 canvas.addEventListener('pointermove', (e) => {
   const P = XPL_PTR;
   if (!P.ids.has(e.pointerId)) {
-    // (a hand over what can be picked up)
-    if (XPL.live && !P.ids.size && e.pointerType === 'mouse') canvas.style.cursor = !XPL.held && xplUnder(e.clientX, e.clientY, false) ? 'pointer' : '';
+    // (a hand over what can be picked up, and its name: updateExplode; the name keeps up with the pointer)
+    if (e.pointerType !== 'touch') {
+      P.hx = e.clientX; P.hy = e.clientY; P.over = P.stale = true;
+      if (XPL.named && XPL.named !== XPL.held) xplTip(XPL.named, P.hx, P.hy);
+    }
     return;
   }
   if (Math.hypot(e.clientX - P.x0, e.clientY - P.y0) > 5) P.far = true;
@@ -608,11 +685,15 @@ canvas.addEventListener('pointermove', (e) => {
 });
 for (const type of ['pointerup', 'pointercancel']) canvas.addEventListener(type, (e) => {
   const P = XPL_PTR;
-  if (!P.ids.delete(e.pointerId) || P.ids.size || P.far || type !== 'pointerup' || performance.now() - P.t0 > 600) return;
+  if (!P.ids.delete(e.pointerId)) return;
+  P.stale = true;
+  if (P.ids.size || P.far || type !== 'pointerup' || performance.now() - P.t0 > 600) return;
   if (!XPL.live || switching) return;
-  const it = xplUnder(e.clientX, e.clientY, true);
+  const it = xplAt(e.clientX, e.clientY);
   if (it) xplPick(it); else xplDrop();
 });
+canvas.addEventListener('pointerleave', () => { XPL_PTR.over = false; XPL_PTR.stale = true; });
+controls.addEventListener('change', () => { XPL_PTR.stale = true; });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') xplDrop(); });
 
 /* ---------- switches ---------- */
