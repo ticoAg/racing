@@ -35,7 +35,7 @@ function mechMaterials() {
   fins.repeat.set(26, 1);
   const two = { side: THREE.DoubleSide };
   // sand-cast aluminium, dark magnesium, turned steel, wrinkle paint on the cam covers, high-voltage orange, radiator core
-  M.cast = new THREE.MeshStandardMaterial({ color: 0x9a9da3, metalness: 0.9, roughness: 0.52, normalMap: grain, normalScale: new THREE.Vector2(0.7, 0.7), ...two });
+  M.cast = new THREE.MeshStandardMaterial({ color: 0x84878d, metalness: 0.9, roughness: 0.55, normalMap: grain, normalScale: new THREE.Vector2(0.7, 0.7), ...two });
   M.mag = new THREE.MeshStandardMaterial({ color: 0x3b3d42, metalness: 0.75, roughness: 0.5, normalMap: grain, normalScale: new THREE.Vector2(0.35, 0.35), ...two });
   M.steel = new THREE.MeshStandardMaterial({ color: 0xc8cbcf, metalness: 1, roughness: 0.2, ...two });
   M.crackle = new THREE.MeshStandardMaterial({ color: 0x8e0c14, metalness: 0.1, roughness: 0.7, normalMap: grain, normalScale: new THREE.Vector2(1.2, 1.2), ...two });

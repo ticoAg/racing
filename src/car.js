@@ -2966,7 +2966,9 @@ window.__ui = { setOption, applyPreset, setDoors, setWingUp, setPose, setLights,
   // a part picked up by its name, let go, and where its middle is in the picture (client px)
   pick: (key) => xplPick(XPL.items.find((it) => it.key === key)), drop: xplDrop,
   spot: (key) => { const it = XPL.items.find((i) => i.key === key), r = canvas.getBoundingClientRect(), v = it.c.clone().add(it.pos).project(camera); return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height]; },
-  camera, controls, get flying() { return !!camAnim; }, skinTop, floorAt: (x) => BC.yf(x) };
+  camera, controls, get flying() { return !!camAnim; }, skinTop, floorAt: (x) => BC.yf(x),
+  // the pointer held over a point of the picture (client px), and what a part is called
+  point: (x, y) => Object.assign(XPL_PTR, { hx: x, hy: y, over: true, stale: true }), nameOf: xplName, partAt: (x, y) => { const it = xplAt(x, y); return it ? it.key : ''; } };
 // offline render of the sound engine through a scripted drive, for automated level checks
 window.__audioTest = async (sec = 16, plan = [[0, 'park'], [3.5, 'brake'], [10, 'corner']]) => {
   const sr = 22050, ctx = new OfflineAudioContext(2, sr * sec, sr);

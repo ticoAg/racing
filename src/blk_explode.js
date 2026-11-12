@@ -14,7 +14,8 @@
    ever seen from one side get an inner face while parts are off the car.
    Any part can be picked up for a closer look: it rises to eye level, the
    camera comes in, the studio dims around it, and dragging turns the part
-   itself, so that every side of it can be brought into the light.
+   itself, so that every side of it can be brought into the light. The part
+   under the pointer, and the one held up, is named.
    ========================================================================= */
 // the systems, in the order of their buttons. list: the parts of a bay row by row ("/" starts a new row; + and - are
 // the car's right and left side, a digit is the wheel). Rows run away from the car unless they run along it; gap is the
@@ -35,6 +36,24 @@ const XPL_MODS = [
 const XPL_BANDS = { L: ['aero', 'body', 'canopy'], R: ['wheels', 'cabin', 'doors'], B: ['tail', 'susp'], F: ['power'] };
 const XPL_OF = {};
 for (const m of XPL_MODS) { m.rows = m.list.split(' / ').map((r) => r.split(' ')); for (const k of m.rows.flat()) XPL_OF[k] = m.id; }
+// what the parts are called: by the name without its end, side or corner, which go in front of it
+const XPL_NAMES = {
+  bonnet: () => (SPEC.mech.engine && SPEC.mech.engine.x0 > 0 ? '发动机盖' : '前盖'), deck: () => (SPEC.mech.engine && SPEC.mech.engine.x0 < 0 ? '发动机盖' : '后盖'), fender: '翼子板',
+  doorOuter: '车门外板', doorTrim: '车门内饰板', doorGlass: '车窗玻璃', mirror: '后视镜',
+  glass: '风挡玻璃', pillar: 'A柱', roof: '车顶', quarter: '后侧窗', scoop: '车顶进气口',
+  splitter: '前分流器', fence: '导流片', canard: '鸭翼', skirt: '侧裙', diffuser: '扩散器', plane: '尾翼主翼', flap: '尾翼襟翼', plate: '尾翼端板', pylon: '尾翼支架', spoiler: '扰流板', fin: '鲨鱼鳍',
+  seat: '座椅', dash: '仪表台', steer: '方向盘', console: '中控台', pedals: '踏板', bulkhead: '后隔板',
+  upright: '立柱', brake: '制动卡钳', disc: '制动盘', rim: '轮毂', tyre: '轮胎', lock: '中央锁止螺母',
+  tail: '尾板', taillight: '尾灯', exhaust: '排气尾嘴',
+  lower: '下叉臂', upper: '上叉臂', coil: '避震器', bar: '防倾杆', rack: '转向机',
+  engine: '缸体', head: '气缸盖', intake: () => ({ plenum: '进气歧管', trumpets: '进气喇叭口', blower: '机械增压器' })[SPEC.mech.engine.intake], manifold: '排气歧管', pipe: '排气管',
+  gearbox: '变速箱', propshaft: '扭力管', shaft: '半轴', radiator: '散热器', motor: '电机', gear: '减速器', inverter: '逆变器', battery: '电池组',
+};
+const XPL_CORNER = ['左前', '右前', '左后', '右后'];
+function xplName(key) {
+  const [, base, end, side] = key.match(/^(.*?)([FR])?([+-]|\d)?$/), name = XPL_NAMES[base];
+  return (side === '+' ? '右' : side === '-' ? '左' : side ? XPL_CORNER[side] : '') + (end === 'F' ? '前' : end === 'R' ? '后' : '') + (typeof name === 'function' ? name() : name);
+}
 const XPL_OUT = 1.9, XPL_IN = 1.6;      // seconds for a system to be laid out and to be fitted again
 const XPL_SPAN = 0.5;                   // share of that time one part is on the move
 const XPL_GAP = 0.15, XPL_ROW = 0.22;   // floor between parts in a row, between rows (m)
@@ -44,8 +63,10 @@ const XPL_EDGE = 0.17;                  // a bay's outline stands this far off i
 // mods: per system { k: 0 on the car .. 1 in its bay }. reg: what can move. items: the parts with their places.
 // panels, twins and pieces only exist once parts have been off the car. hold: how far out the parts go (stills of the flight).
 // held: the part picked up for a closer look; back: where the camera was before; focus: how far up the part in the air is.
-const XPL = { hold: 1, held: null, back: null, focus: 0, turned: false, lamps: null, tent: null, live: false, any: false, mods: {}, reg: [], items: [], bays: {}, box: null, floor: null, fade: 0, hover: '', shadow: 1, ready: false, panels: [], twins: [], pieces: [] };
+// named: the part whose name is shown.
+const XPL = { named: null, hold: 1, held: null, back: null, focus: 0, turned: false, lamps: null, tent: null, live: false, any: false, mods: {}, reg: [], items: [], bays: {}, box: null, floor: null, fade: 0, hover: '', shadow: 1, ready: false, panels: [], twins: [], pieces: [] };
 for (const m of XPL_MODS) XPL.mods[m.id] = { k: 0, wait: 0, hot: 0 };
+const XPL_TIP = document.getElementById('tip');
 
 const xplKey = (name, side = 0) => name + (side > 0 ? '+' : side < 0 ? '-' : '');
 function xplAdd(o, key, panel = false) {
@@ -61,6 +82,7 @@ function xplReset() {
   for (const m of XPL_MODS) Object.assign(XPL.mods[m.id], { k: 0, wait: 0, hot: 0 });
   Object.assign(XPL, { held: null, back: null, focus: 0, live: false, any: false, reg: [], items: [], bays: {}, box: null, fade: 0, shadow: 1, ready: false, panels: [], twins: [], pieces: [] });
   heldPass.enabled = false; controls.enableRotate = true; canvas.style.cursor = '';
+  xplTip(null);
   if (XPL.lamps) xplLamps(null, 0);
   xplFloorOff();
   if (BODY.shell) BODY.shell.visible = true;
@@ -444,6 +466,7 @@ function xplOpen(live) {
     xplLayout();
     if (state.doors && state.apart.doors) setDoors(false);
   } else { xplSync(); canvas.style.cursor = ''; }
+  XPL_PTR.stale = true;
   if (state.view !== 'driver') goView(state.view, window.__TEST__ ? 0 : 1.7);
 }
 // a change of kit or wing while the store is open: the bays are packed again
@@ -481,6 +504,23 @@ function updateExplode(dt, snap = false) {
     if (any !== XPL.any) { XPL.any = any; xplSync(); }
     xplPose();
     shadowDirty = Math.max(shadowDirty, 2);
+  }
+  // the name of the part held up, or of the one the pointer is over: looked up again when the pointer, the camera
+  // or the parts have moved (a look-up may take a few milliseconds over the large panels: no more often than a
+  // quarter of the time goes to it), and not while the camera flies or a drag turns it
+  const P = XPL_PTR;
+  if (moved) P.stale = true;
+  if (XPL.held) xplTip(XPL.held);
+  else if (P.stale) {
+    const busy = !!camAnim || P.ids.size > 0, now = performance.now();
+    if (busy || !live || !P.over) { xplTip(null); canvas.style.cursor = ''; P.stale = busy; }
+    else if (snap || now - P.seen > Math.max(40, 4 * P.cost)) {
+      P.stale = false;
+      const it = xplAt(P.hx, P.hy);
+      P.seen = performance.now(); P.cost = P.seen - now;
+      canvas.style.cursor = it ? 'pointer' : '';
+      xplTip(it, P.hx, P.hy);
+    }
   }
   // the bay outlines: there while the store is open, brighter for the system that is moving or pointed at
   if (XPL.floor) {
@@ -542,8 +582,9 @@ function xplFree() {
 /* ---------- a part picked up ---------- */
 const xplMeshes = (o, out) => { if (!o.visible) return; if (o.isMesh) out.push(o); for (const c of o.children) xplMeshes(c, out); };
 const _xray = new THREE.Raycaster(), _xn = new THREE.Vector2(), _xball = new THREE.Sphere();
-// the part under a point of the picture (client px): the nearest box for the pointer, the nearest surface for a click
-function xplUnder(x, y, exact) {
+// the part under a point of the picture (client px): the nearest box, or the nearest surface (slender: of the parts
+// with few triangles only, which is what the thin ones are; the others are slow to try)
+function xplUnder(x, y, exact, slender = false) {
   const r = canvas.getBoundingClientRect();
   _xray.setFromCamera(_xn.set((x - r.left) / r.width * 2 - 1, 1 - (y - r.top) / r.height * 2), camera);
   const ray = _xray.ray, near = [];
@@ -559,10 +600,28 @@ function xplUnder(x, y, exact) {
     if (d > at) break;
     const meshes = [];
     for (const j of it.objs) xplMeshes(j.o, meshes);
+    if (slender && (it.tris || (it.tris = meshes.reduce((n, m) => n + (m.geometry.index || m.geometry.attributes.position).count / 3, 0))) > 6000) continue;
     const hit = _xray.intersectObjects(meshes, false)[0];
     if (hit && hit.distance < at) { at = hit.distance; best = it; }
   }
   return best;
+}
+// the part at the pointer: the one whose surface is under it, or within a few pixels of it (a bar, a rod, a spring
+// are thin)
+function xplAt(x, y) {
+  let it = xplUnder(x, y, true);
+  for (let k = 0; !it && k < 4; k++) it = xplUnder(x + [5, -5, 0, 0][k], y + [0, 0, 5, -5][k], true, true);
+  return it;
+}
+// its name: beside the pointer, inside the window; for the part held up, in a place of its own (set in the styles)
+function xplTip(it, x = 0, y = 0) {
+  const T = XPL_TIP, held = !!it && it === XPL.held;
+  if (held && it === XPL.named && T.classList.contains('is-held')) return;
+  if (it !== XPL.named) { XPL.named = it; T.textContent = it ? xplName(it.key) : ''; T.hidden = !it; }
+  T.classList.toggle('is-held', held);
+  if (!it || held) { T.style.transform = ''; return; }
+  const w = T.offsetWidth, h = T.offsetHeight;
+  T.style.transform = `translate(${Math.round(clamp(x + 14, 8, innerWidth - w - 8))}px, ${Math.round(y + 22 + h > innerHeight - 8 ? y - h - 12 : y + 22)}px)`;
 }
 // picked up: it rises above where it lies and the camera comes in a little above it, from the side it was looking from
 function xplPick(it) {
@@ -588,23 +647,29 @@ function xplPick(it) {
 function xplDrop(fly = true) {
   if (!XPL.held) return;
   XPL.held = null;
+  XPL_PTR.stale = true;
   controls.enableRotate = true;
   if (fly && XPL.back) flyCamera(XPL.back.p, XPL.back.t, viewFov(state.view, camera.aspect), window.__TEST__ ? 0 : 1.0, state.view);
   XPL.back = null;
   needsRender = true;
 }
 // the pointer: a click picks a part up (or, beside it, lets it go); a drag turns the part that is held
-const XPL_PTR = { ids: new Set(), x: 0, y: 0, x0: 0, y0: 0, t0: 0, far: false };
+// (over, hx, hy: a pointer that hovers is over the picture, and where; stale: what it is over has to be looked up
+// again; seen, cost: when it last was, and how long that took)
+const XPL_PTR = { ids: new Set(), x: 0, y: 0, x0: 0, y0: 0, t0: 0, far: false, over: false, hx: 0, hy: 0, stale: false, seen: 0, cost: 0 };
 canvas.addEventListener('pointerdown', (e) => {
   const P = XPL_PTR;
-  P.ids.add(e.pointerId);
+  P.ids.add(e.pointerId); P.stale = true;
   P.x = P.x0 = e.clientX; P.y = P.y0 = e.clientY; P.t0 = performance.now(); P.far = P.ids.size > 1;
 });
 canvas.addEventListener('pointermove', (e) => {
   const P = XPL_PTR;
   if (!P.ids.has(e.pointerId)) {
-    // (a hand over what can be picked up)
-    if (XPL.live && !P.ids.size && e.pointerType === 'mouse') canvas.style.cursor = !XPL.held && xplUnder(e.clientX, e.clientY, false) ? 'pointer' : '';
+    // (a hand over what can be picked up, and its name: updateExplode; the name keeps up with the pointer)
+    if (e.pointerType !== 'touch') {
+      P.hx = e.clientX; P.hy = e.clientY; P.over = P.stale = true;
+      if (XPL.named && XPL.named !== XPL.held) xplTip(XPL.named, P.hx, P.hy);
+    }
     return;
   }
   if (Math.hypot(e.clientX - P.x0, e.clientY - P.y0) > 5) P.far = true;
@@ -620,11 +685,15 @@ canvas.addEventListener('pointermove', (e) => {
 });
 for (const type of ['pointerup', 'pointercancel']) canvas.addEventListener(type, (e) => {
   const P = XPL_PTR;
-  if (!P.ids.delete(e.pointerId) || P.ids.size || P.far || type !== 'pointerup' || performance.now() - P.t0 > 600) return;
+  if (!P.ids.delete(e.pointerId)) return;
+  P.stale = true;
+  if (P.ids.size || P.far || type !== 'pointerup' || performance.now() - P.t0 > 600) return;
   if (!XPL.live || switching) return;
-  const it = xplUnder(e.clientX, e.clientY, true);
+  const it = xplAt(e.clientX, e.clientY);
   if (it) xplPick(it); else xplDrop();
 });
+canvas.addEventListener('pointerleave', () => { XPL_PTR.over = false; XPL_PTR.stale = true; });
+controls.addEventListener('change', () => { XPL_PTR.stale = true; });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') xplDrop(); });
 
 /* ---------- switches ---------- */

@@ -28,7 +28,7 @@ The model is chosen in the header (or with `?car=g8`, `e4`, `r10`); the car is t
 
   The powertrain and the suspension lie under the skin and are only drawn while the store is open. They are built from the model's hard points (axles, engine position, exhaust tips) and kept inside the bodywork that was drawn first: under the skin or in a wheel arch, over the floor, clear of the cabin and of each other.
 
-  Any part, lying in its bay or fitted to the car, is picked up with a click: it rises to eye level and floats there, the camera comes in, the studio darkens behind it and the part stands in a light of its own (a tent of soft boxes on every side and a key lamp over the camera's shoulder). A drag turns the part itself about its middle, so every side of it can be brought into the light; zooming in shows the paint flake, the carbon weave, the stitching. With the turntable on, the held part turns by itself. A click beside it, Escape or a view button sets it down where it lay.
+  The part under the pointer is named beside it (左前下叉臂, 右排气歧管, 发动机盖 …), and so is the part held up. Any part, lying in its bay or fitted to the car, is picked up with a click: it rises to eye level and floats there, the camera comes in, the studio darkens behind it and the part stands in a light of its own (a tent of soft boxes on every side and a key lamp over the camera's shoulder). A drag turns the part itself about its middle, so every side of it can be brought into the light; zooming in shows the paint flake, the carbon weave, the stitching. With the turntable on, the held part turns by itself. A click beside it, Escape or a view button sets it down where it lay.
 
   The bays are packed from the sizes of the parts, so they suit every model and configuration (parts not fitted, such as the other wing or the track kit, take no place). The camera rises to look over the whole floor (the wheel and cabin views look at their bays); pointing at a system's button lights its bay. While the store is open the system buttons take the place of the driving programs, and the airflow view puts the car together first; asked for while driving, the car parks, switches off and is then taken apart
 - Detailed cockpit with a first-person driver view that rides the body and leans with the g-forces
@@ -57,7 +57,7 @@ The model is chosen in the header (or with `?car=g8`, `e4`, `r10`); the car is t
 | `src/blk_flow.js` | 3D lattice-Boltzmann tunnel: solver, voxelised car, smoke streaklines, physics checks |
 | `src/blk_audio.js` | Sound engine (AudioWorklet engine voice from a firing table, electric motors, supercharger, gear whine) and music |
 | `src/blk_mech.js` | What is under the skin: engine, intake, manifolds, gearbox, shafts, exhaust and radiators, or motors, inverters and battery; wishbones, coil-overs, rack and anti-roll bars |
-| `src/blk_explode.js` | Parts store: the systems and their bays, the floor plan packed from the parts' sizes, the skin cut into panels along the shut lines, inner faces for one-sided surfaces, the overview camera, picking a part up to turn it in its own light |
+| `src/blk_explode.js` | Parts store: the systems and their bays, the floor plan packed from the parts' sizes, the skin cut into panels along the shut lines, inner faces for one-sided surfaces, the overview camera, the parts' names under the pointer, picking a part up to turn it in its own light |
 | `src/page.template.html` | Markup and styles |
 | `src/fonts.css` | `@font-face` rules for the self-hosted fonts (generated) |
 | `build.py` | Inlines the app into `public/index.html` and copies the three.js modules it imports into `public/vendor/` |
@@ -104,7 +104,7 @@ node tools/drive.js                          # drives every model through the pr
 node tools/selfhost_check.js                 # fails if the built page fetches anything off-site
 node tools/hdr_check.js                      # fails if over-bright highlights turn into black blocks after bloom
 node tools/flow_check.js                     # airflow solver: drag of a square plate against the measured value, checks on the car's flow (--car=g8 for another model)
-node tools/explode.js                        # parts store: every model laid out and put together again (panels cover the skin, every part on the floor in its bay, none overlapping, the powertrain and suspension under the skin and over the floor, a part picked up and let go, one system alone), then the buttons, a part picked up by a click, driving and airflow (--shots saves stills, --stills skips the clicks)
+node tools/explode.js                        # parts store: every model laid out and put together again (panels cover the skin, every part on the floor in its bay, none overlapping, the powertrain and suspension under the skin and over the floor, every part named under the pointer, a part picked up and let go, one system alone), then the buttons, a part picked up by a click, driving and airflow (--shots saves stills, --stills skips the clicks)
 CAR=e4 VIEWS=front34,side node tools/shot.js out/e4   # stills of a model
 ```
 

@@ -185,6 +185,23 @@ body.aero-on .hud-aero { display: grid; }
 .hud-aero dd { margin: 0; color: var(--ink-dim); }
 .hud-aero b { color: var(--ink); font-weight: 700; font-size: 13px; }
 
+/* ---------- the name of the part under the pointer in the parts store, or of the one held up ---------- */
+.tip {
+  position: fixed; left: 0; top: 0;
+  padding: 6px 11px;
+  font-size: 12.5px; line-height: 1.2; letter-spacing: 0.06em; white-space: nowrap;
+  color: var(--ink);
+  background: var(--glass);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  backdrop-filter: blur(16px) saturate(1.2);
+  pointer-events: none;
+  z-index: 2;
+}
+.tip[hidden] { display: none; }
+.tip.is-held { left: calc((100% - var(--panel-space)) / 2); top: calc(env(safe-area-inset-top, 0px) + 66px); transform: translateX(-50%); }
+
 /* ---------- configurator panel ---------- */
 .panel {
   position: fixed;
@@ -327,6 +344,8 @@ body.is-ready .rail { opacity: 1; transform: translate(-50%, 0); }
   <div class="veil-name" id="veilName"></div>
   <div class="loader-track"><div id="veil-bar"></div></div>
 </div>
+
+<div class="tip" id="tip" aria-hidden="true" hidden></div>
 
 <header class="mark" aria-label="Halcyon H9">
   <span class="mark-brand">HALCYON</span>
