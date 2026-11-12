@@ -1,9 +1,12 @@
 // Parts store: takes every model apart onto the floor, system by system, and puts it back together.
 //   test page (stills): the cut panels cover exactly the skin they replace; every part lies on the floor inside its
-//                       system's bay and no two parts overlap; one system can be fitted on its own; nothing dips
-//                       under the floor on the way; nothing extra is drawn once the car is whole again
-//   live page (clicks): the button and the system buttons, a driving program, the airflow view, a model change
-// usage: node tools/explode.js [--shots] [--stills]      (--shots saves out/store_<model>.png and out/store_ui.png; --stills skips the clicks)
+//                       system's bay and no two parts overlap; a part picked up floats clear of the floor in its own
+//                       light, turns about its middle and lies as before when let go; one system can be fitted on
+//                       its own; nothing dips under the floor on the way; nothing extra is drawn once the car is whole
+//   live page (clicks): the button and the system buttons, a part picked up by a click and turned by a drag, a driving
+//                       program, the airflow view, a model change
+// usage: node tools/explode.js [--shots] [--stills | --pick]   (--shots saves out/store_<model>.png, out/store_ui.png and out/store_pick.png;
+//        --stills skips the clicks, --pick stops after the click that picks a part up)
 const http = require('http'), fs = require('fs'), path = require('path');
 const { chromium } = require('playwright');
 const root = path.join(__dirname, '..');
@@ -82,6 +85,19 @@ const check = (ok, what) => { if (!ok) fails.push(what); return ok ? 'ok' : 'FAI
       });
       u.goView('front', 0);
       out.png = window.__grab();
+      // a part picked up: clear of the floor, in the light, the camera on it; turned: still there; let go: as before
+      {
+        const V = X.box.min.constructor, of = (key) => boxes().find((p) => p.key === key).b, same = (a, b) => a.min.distanceTo(b.min) + a.max.distanceTo(b.max) < 1e-4;
+        const lay = of('tyre1').clone(), other = of('seat+').clone(), cam = u.camera.position.clone();
+        u.pick('tyre1'); window.__renderNow();
+        const it = X.held, up = of('tyre1'), mid = up.getCenter(new V());
+        const lit = it.objs.every((j) => (j.o.layers.mask & 2) === 2), near = u.controls.target.distanceTo(mid) < 0.25 * it.r + 0.05;
+        it.q.setFromAxisAngle(new V(0.3, 1, 0.2).normalize(), 2); X.turned = true; window.__renderNow();
+        const turned = of('tyre1'), stays = turned.getCenter(new V()).distanceTo(mid) < 5e-3 && Math.abs(turned.max.x - turned.min.x - (up.max.x - up.min.x)) > 0.02;
+        out.pick = { held: it.key, clear: +up.min.y.toFixed(2), lit, near, stays, alone: same(of('seat+'), other), hand: !u.controls.enableRotate, focus: X.focus };
+        u.drop(); window.__renderNow();
+        out.put = { down: same(of('tyre1'), lay), unlit: it.objs.every((j) => (j.o.layers.mask & 2) === 0), camera: u.camera.position.distanceTo(cam) < 1e-3, free: u.controls.enableRotate && !X.held && X.focus === 0 };
+      }
       // one system back onto the car, the others stay where they are
       u.setModule('wheels', false); window.__renderNow();
       out.one = home('wheels') && !home('body') && !home('cabin') && X.any;
@@ -110,6 +126,8 @@ const check = (ok, what) => { if (!ok) fails.push(what); return ok ? 'ok' : 'FAI
       '| on the floor:', check(r.laid > 55 && r.bays === 7 && r.floor[0] > 0.005 && r.floor[1] < 0.03 && r.shellHidden, id + ' on the floor'),
       '| each in its bay:', check(r.astray.length === 0, id + ' astray: ' + r.astray),
       '| none overlap:', check(r.overlaps.length === 0, id + ' overlaps: ' + r.overlaps),
+      '| picked up:', check(r.pick.held === 'tyre1' && r.pick.clear > 0.5 && r.pick.lit && r.pick.near && r.pick.stays && r.pick.alone && r.pick.hand && r.pick.focus === 1, id + ' pick'),
+      '| let go:', check(r.put.down && r.put.unlit && r.put.camera && r.put.free, id + ' drop'),
       '| one system alone:', check(r.one, id + ' single system'),
       '| above the floor on the way:', check(r.dip > Math.min(0, r.rest) - 1e-3, id + ' dips'),
       '| all back:', check(r.back && r.shellBack && r.twinsOff && r.panelsOff && r.linesOff && r.calls2 === r.calls0, id + ' back'));
@@ -134,6 +152,22 @@ const check = (ok, what) => { if (!ok) fails.push(what); return ok ? 'ok' : 'FAI
   await page.click('[data-toggle="explode"]'); await allOut();
   let s = await st();
   console.log('button:', JSON.stringify(s), check(s.explode && s.live && s.pressed === 'true' && s.title === '组合' && s.buttons && !s.programs && s.fitted === '', 'button lays the car out'));
+  // a click on a part picks it up, a drag turns it, Escape lets it go
+  const [bx, by] = await page.evaluate(() => window.__ui.spot('bonnet'));
+  await page.mouse.click(bx, by);
+  // (up in the air, and the camera has arrived)
+  await page.waitForFunction(() => window.__ui.XPL.focus === 1 && !window.__ui.flying, null, { timeout: 400000, polling: 250 });
+  const got = await page.evaluate(() => { const u = window.__ui; return { key: u.XPL.held && u.XPL.held.key, hand: !u.controls.enableRotate, cam: u.camera.position.toArray() }; });
+  // (the camera stays where it is: the turntable's last drift dying away is millimetres, an orbit by this drag would be metres)
+  const [w2, h2] = [480, 200];
+  await page.mouse.move(w2, h2); await page.mouse.down(); await page.mouse.move(w2 + 60, h2 + 25, { steps: 6 }); await page.mouse.up();
+  await page.waitForTimeout(1500);
+  const turned = await page.evaluate((cam) => { const u = window.__ui, q = u.XPL.held && u.XPL.held.q; return { still: !!u.XPL.held, w: q ? +q.w.toFixed(3) : 1, moved: +u.camera.position.distanceTo({ x: cam[0], y: cam[1], z: cam[2] }).toFixed(4) }; }, got.cam);
+  if (shots) await page.screenshot({ path: path.join(root, 'out', 'store_pick.png'), timeout: 120000 });
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => window.__ui.XPL.focus === 0 && !window.__ui.XPL.held, null, { timeout: 400000, polling: 250 });
+  console.log('picked up:', JSON.stringify(got.key), JSON.stringify(turned), check(got.key === 'bonnet' && got.hand && turned.still && turned.w < 0.999 && turned.moved < 0.05, 'a click picks a part up and a drag turns it'));
+  if (process.argv.includes('--pick')) { await browser.close(); server.close(); if (fails.length) { console.error('FAILED:', fails.join('; ')); process.exit(1); } console.log('pick ok'); return; }
   // one system fitted, then taken off again
   await page.click('[data-mod="wheels"]');
   await page.waitForFunction(() => window.__ui.XPL.mods.wheels.k === 0, null, { timeout: 400000, polling: 250 });

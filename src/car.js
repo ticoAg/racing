@@ -2349,6 +2349,9 @@ function viewLimits(name) {
   controls.enableZoom = !inside; controls.enablePan = !inside;
   controls.maxPolarAngle = inside ? Math.PI * 0.72 : Math.PI * 0.492;
   controls.rotateSpeed = inside ? 0.45 : 1;
+  // a part held up for a closer look is turned by hand: the camera only comes closer, backs away or moves across
+  controls.enableRotate = !XPL.held;
+  if (XPL.held) { controls.minDistance = Math.max(0.12, XPL.held.r * 0.6); controls.maxDistance = Math.max(2.5, XPL.held.r * 12); }
 }
 // the part of the canvas the open panel leaves free (CSS px)
 function freeSize() {
@@ -2379,16 +2382,22 @@ function viewTarget(name) {
 }
 function goView(name, dur = 1.25) {
   const from = state.view;
+  xplDrop(false);
   state.view = name;
   if (name === 'cabin' && !state.doors && !(state.explode && state.apart.doors)) setDoors(true);
   if (name === 'driver' && state.turntable) setTurntable(false);
   if (name === 'driver') state.explode = false;
   const { p, t } = viewTarget(name);
-  const fov1 = viewFov(name, camera.aspect);
+  const inOut = (from === 'driver') !== (name === 'driver');
+  flyCamera(p, t, viewFov(name, camera.aspect), dur && inOut ? Math.max(dur, 1.6) : dur, name);
+  syncUI();
+}
+// the camera goes to p and looks at t: at once, or flying there round what it looks at; then the limits of view `name` hold
+function flyCamera(p, t, fov1, dur, name) {
   if (reduceMotion || dur === 0) {
     camAnim = null; viewLimits(name);
     camera.position.copy(p); controls.target.copy(t); camera.fov = fov1; camera.updateProjectionMatrix();
-    controls.update(); needsRender = true; syncUI(); return;
+    controls.update(); needsRender = true; return;
   }
   // free limits while flying between the outside and the driver's seat, or up over the parts store
   controls.minDistance = 0.02; controls.maxDistance = 80;
@@ -2397,9 +2406,7 @@ function goView(name, dur = 1.25) {
   let dth = s1.theta - s0.theta;
   while (dth > Math.PI) dth -= Math.PI * 2;
   while (dth < -Math.PI) dth += Math.PI * 2;
-  const inOut = (from === 'driver') !== (name === 'driver');
-  camAnim = { t: 0, dur: inOut ? Math.max(dur, 1.6) : dur, s0, s1, dth, t0: controls.target.clone(), t1: t, fov0: camera.fov, fov1, name };
-  syncUI();
+  camAnim = { t: 0, dur, s0, s1, dth, t0: controls.target.clone(), t1: t.clone(), fov0: camera.fov, fov1, name };
 }
 const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
 const panelEl = () => document.getElementById('panel');
@@ -2778,6 +2785,30 @@ const size0 = () => [canvas.clientWidth || window.innerWidth, canvas.clientHeigh
 const rtOpts = { type: THREE.HalfFloatType, samples: 4 };
 const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(size0()[0] * DPR, size0()[1] * DPR, rtOpts));
 composer.addPass(new RenderPass(scene, camera));
+// a part held up for a closer look (blk_explode.js): the studio is darkened behind a veil, then the part is drawn
+// once more over it in its own light: a tent of soft boxes turned to face the camera, and lamps that shine on layer 1 only
+const heldPass = new RenderPass(scene, camera);
+heldPass.clear = false; heldPass.enabled = false;
+{
+  const veil = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ color: 0x020304, transparent: true, opacity: 0, depthTest: false, depthWrite: false }));
+  const veilScene = new THREE.Scene(), draw = heldPass.render.bind(heldPass);
+  veilScene.add(veil);
+  heldPass.render = (renderer, write, read, ...rest) => {
+    const k = ease(XPL.focus), auto = renderer.autoClear, env = scene.environment, power = scene.environmentIntensity;
+    veil.material.opacity = 0.82 * k;
+    renderer.autoClear = false;
+    renderer.setRenderTarget(read);
+    renderer.render(veilScene, blurCam);
+    renderer.autoClear = auto;
+    camera.layers.set(1);
+    scene.environment = XPL.tent; scene.environmentIntensity = lerp(0.6, 1, k);
+    scene.environmentRotation.y = Math.atan2(camera.position.x - controls.target.x, camera.position.z - controls.target.z);
+    draw(renderer, write, read, ...rest);
+    camera.layers.set(0);
+    scene.environment = env; scene.environmentIntensity = power; scene.environmentRotation.y = 0;
+  };
+}
+composer.addPass(heldPass);
 // last line of defence before bloom: no NaN or Inf may reach the blur chain
 composer.addPass(new ShaderPass({
   name: 'HdrSanitize',
@@ -2890,7 +2921,7 @@ function loop() {
     if (paintAnim.t >= 1) paintAnim = null;
     active = true;
   }
-  controls.autoRotate = state.turntable && !camAnim;
+  controls.autoRotate = state.turntable && !camAnim && !XPL.held;
   controls.autoRotateSpeed = 0.55;
   if (controls.update(dt)) needsRender = true;
   frameNo++;
@@ -2928,7 +2959,11 @@ window.__info = () => {
   return r;
 };
 window.__cam = () => camera.fov;
-window.__ui = { setOption, applyPreset, setDoors, setWingUp, setPose, setLights, setExplode, setModule, goView, setPanel, setAero, setModel, state, DRIVE, AERO, FX, WORLD, TRACK, FLOW, XPL, BODY, MODELS, get SPEC() { return SPEC; } };
+window.__ui = { setOption, applyPreset, setDoors, setWingUp, setPose, setLights, setExplode, setModule, goView, setPanel, setAero, setModel, state, DRIVE, AERO, FX, WORLD, TRACK, FLOW, XPL, BODY, MODELS, get SPEC() { return SPEC; },
+  // a part picked up by its name, let go, and where its middle is in the picture (client px)
+  pick: (key) => xplPick(XPL.items.find((it) => it.key === key)), drop: xplDrop,
+  spot: (key) => { const it = XPL.items.find((i) => i.key === key), r = canvas.getBoundingClientRect(), v = it.c.clone().add(it.pos).project(camera); return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height]; },
+  camera, controls, get flying() { return !!camAnim; } };
 // offline render of the sound engine through a scripted drive, for automated level checks
 window.__audioTest = async (sec = 16, plan = [[0, 'park'], [3.5, 'brake'], [10, 'corner']]) => {
   const sr = 22050, ctx = new OfflineAudioContext(2, sr * sec, sr);
