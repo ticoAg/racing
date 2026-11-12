@@ -127,7 +127,8 @@ function programChange() {
 
 function driveProgram(dt) {
   const d = DRIVE;
-  if (d.prog !== state.pose) programChange();
+  // (a car that is apart goes back together before it starts)
+  if (d.prog !== state.pose && XPL.k === 0) programChange();
   d.t += dt; d.phaseT += dt;
   if (d.start > 0) {
     // cranking, then the engine catches and flares; an electric car closes its contactors and is ready
@@ -285,7 +286,7 @@ function updateDrive(dt, t, snap = false) {
   const yawT = -S.yaw * d.latG;
   const inside = state.view === 'cabin' || state.view === 'driver';
   // steering: geometry plus a little understeer, steering column ratio 13:1 in the cockpit
-  const steerT = d.v < 0.3 && d.prog === 'park' && WORLD.mix < 0.5 ? (inside ? 0 : 0.17) : -(WHEELBASE * d.k + S.understeer * d.latG) * 1.35;
+  const steerT = d.v < 0.3 && d.prog === 'park' && WORLD.mix < 0.5 ? (inside || XPL.want ? 0 : 0.17) : -(WHEELBASE * d.k + S.understeer * d.latG) * 1.35;
   const e = snap ? 1 : 1 - Math.exp(-dt * 5);
   d.yaw += (yawT - d.yaw) * e; d.steer += (steerT - d.steer) * (snap ? 1 : 1 - Math.exp(-dt * 6));
   // road texture, kerb ridges and ABS shudder

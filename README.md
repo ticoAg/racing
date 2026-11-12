@@ -15,6 +15,7 @@ The model is chosen in the header (or with `?car=g8`, `e4`, `r10`); the car is t
 
 - Configurator: presets per model, 10 colours × 7 finishes (metallic, pearl, gloss, matte, chrome, chameleon, carbon), 4 wheel designs, rim and caliper colours, GT wing / active spoiler / no wing, track and road aero kits, 5 liveries, 4 interiors
 - Butterfly doors, deployable wing and airbrake
+- Exploded view: one button takes the parked car apart, the same button puts it back together. The skin is cut along its shut lines into bonnet, engine cover, four fenders and the tub, each keeping the lights, vents and lettering on it; the doors come away with their glass, trim panels and mirrors; windscreen, pillars, roof and rear quarters lift off; the wing separates into main plane, flap, end plates and pylons; splitter, canards, skirts, diffuser, tail panel, light bar and exhausts move out; seats, dashboard, steering wheel, console, pedals and bulkhead rise out of the tub; each corner comes apart along its axle into tyre, wheel, centre lock, disc, caliper and upright. The camera backs away to keep all of it in view. A driving program or the airflow view puts the car together first; asked for while driving, the car parks, switches off and then comes apart
 - Detailed cockpit with a first-person driver view that rides the body and leans with the g-forces
 - Vehicle model, per car: torque curve and gearbox (dual-clutch, automatic, sequential, or a single electric reduction with regeneration), rear- or all-wheel drive, tyres with load sensitivity, drag and downforce per axle, ABS brakes with a torque cap, traction and launch control, active low-drag wing trim at V-max, suspension springs with aero compression. Each model has its own attitude: pitch and roll per g, spring frequencies and damping, ride height, rake and camber
 - Driving programs on a procedurally generated night circuit:
@@ -40,6 +41,7 @@ The model is chosen in the header (or with `?car=g8`, `e4`, `r10`); the car is t
 | `src/blk_aero.js` | Pressure map, force arrows, loads; potential-flow fallback |
 | `src/blk_flow.js` | 3D lattice-Boltzmann tunnel: solver, voxelised car, smoke streaklines, physics checks |
 | `src/blk_audio.js` | Sound engine (AudioWorklet engine voice from a firing table, electric motors, supercharger, gear whine) and music |
+| `src/blk_explode.js` | Exploded view: where each named part goes and when, the skin cut into panels along the shut lines, inner faces for one-sided surfaces |
 | `src/page.template.html` | Markup and styles |
 | `src/fonts.css` | `@font-face` rules for the self-hosted fonts (generated) |
 | `build.py` | Inlines the app into `public/index.html` and copies the three.js modules it imports into `public/vendor/` |
@@ -86,6 +88,7 @@ node tools/drive.js                          # drives every model through the pr
 node tools/selfhost_check.js                 # fails if the built page fetches anything off-site
 node tools/hdr_check.js                      # fails if over-bright highlights turn into black blocks after bloom
 node tools/flow_check.js                     # airflow solver: drag of a square plate against the measured value, checks on the car's flow (--car=g8 for another model)
+node tools/explode.js                        # exploded view: every model apart and together again (panels cover the skin, every part returns), then the button with driving and airflow (--shots saves stills)
 CAR=e4 VIEWS=front34,side node tools/shot.js out/e4   # stills of a model
 ```
 

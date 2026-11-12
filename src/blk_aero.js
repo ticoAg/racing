@@ -654,6 +654,7 @@ function updateAeroViz(dt, t, snap = false) {
 async function setAero(on) {
   AERO.on = on;
   if (on) {
+    state.explode = false;   // the tunnel wants a whole car
     syncUI();
     FLOW.init = FLOW.init || flowInit();
     await FLOW.init;
