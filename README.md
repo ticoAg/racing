@@ -15,14 +15,18 @@ The model is chosen in the header (or with `?car=g8`, `e4`, `r10`); the car is t
 
 - Configurator: presets per model, 10 colours × 7 finishes (metallic, pearl, gloss, matte, chrome, chameleon, carbon), 4 wheel designs, rim and caliper colours, GT wing / active spoiler / no wing, track and road aero kits, 5 liveries, 4 interiors
 - Butterfly doors, deployable wing and airbrake
-- Parts store: one button takes the parked car apart and sets its parts out on the studio floor around the bare tub, sorted by system into seven outlined bays; the same button puts it all back together. While the store is open the systems have their own buttons, so each can be fitted to the car or taken off on its own:
-  - body: bonnet, engine cover and the four fenders, cut from the skin along its shut lines, each keeping the lights, vents and lettering on it
+- Parts store: one button takes the parked car apart and sets its parts out on the studio floor around the bare tub, sorted by system into nine outlined bays; the same button puts it all back together. While the store is open the systems have their own buttons, so each can be fitted to the car or taken off on its own:
+  - body: bonnet, engine cover and the four fenders, cut from the skin along its shut lines, each keeping the lights, vents and lettering on it (with the engine behind the cabin, the cover comes off from the bulkhead back, so the engine can be seen in its bay)
   - doors: outer panels, trim panels, windows, mirrors
   - canopy: windscreen, pillars, roof and rear quarters with their headlining, roof scoop
   - aero: splitter, fences, canards, skirts, diffuser, wing (main plane, flap, end plates, pylons) or spoiler, fin
   - cabin: seats, dashboard, steering wheel, console, pedals, bulkhead
   - wheels: per corner the upright, caliper, disc, wheel, tyre and centre lock, in a row along the axle
   - tail: tail panel, light bar, exhausts
+  - suspension: per corner the lower and upper wishbone and the coil-over damper (its foot a fork round the half shaft on a driven axle), the steering rack with its tie rods, front and rear anti-roll bars with their drop links
+  - powertrain, as each model's spec has it. H9: 65° V12 behind the cabin (block with its bores, flywheel and belt drive, two heads with cam covers, coils and ports, twin carbon plenums and air filters, six-into-one manifolds), 7-speed transaxle with the differential, half shafts, a silencer and tail pipe per bank over the gearbox, two radiators in the nose. R10: 90° V10 with ten intake trumpets and a sequential gearbox. G8: 90° V8 behind the front axle with the supercharger in its V, a torque tube under the cabin to the 8-speed transaxle at the rear, and a pipe per bank under the floor to the silencers in the tail. E4: the battery under the floor, and on each axle two motors (hollow, the half shafts run through them), the reduction gears between them and the inverter above, with its cables
+
+  The powertrain and the suspension lie under the skin and are only drawn while the store is open. They are built from the model's hard points (axles, engine position, exhaust tips) and kept inside the bodywork that was drawn first: under the skin or in a wheel arch, over the floor, clear of the cabin and of each other.
 
   Any part, lying in its bay or fitted to the car, is picked up with a click: it rises to eye level and floats there, the camera comes in, the studio darkens behind it and the part stands in a light of its own (a tent of soft boxes on every side and a key lamp over the camera's shoulder). A drag turns the part itself about its middle, so every side of it can be brought into the light; zooming in shows the paint flake, the carbon weave, the stitching. With the turntable on, the held part turns by itself. A click beside it, Escape or a view button sets it down where it lay.
 
@@ -43,7 +47,7 @@ The model is chosen in the header (or with `?car=g8`, `e4`, `r10`); the car is t
 | Path | What |
 | --- | --- |
 | `src/car.js` | Main module; `/*@include file*/` markers pull in the blocks below |
-| `src/blk_models.js` | The models: one spec each (body curves and hard points, axles, aero parts, lights, powertrain, chassis, attitude, voice, presets); the H9 is the base, the others state what differs |
+| `src/blk_models.js` | The models: one spec each (body curves and hard points, axles, aero parts, lights, powertrain, mechanical layout, chassis, attitude, voice, presets); the H9 is the base, the others state what differs |
 | `src/blk_cockpit.js` | Interior |
 | `src/blk_track.js` | Procedural circuit: curvature segments per program, racing line, kerbs, boards, centreline in the car frame |
 | `src/blk_world.js` | Road/floor shader, barriers, floodlights, gantries, sky, environment-map blend, studio↔circuit reveal |
@@ -52,6 +56,7 @@ The model is chosen in the header (or with `?car=g8`, `e4`, `r10`); the car is t
 | `src/blk_aero.js` | Pressure map, force arrows, loads; potential-flow fallback |
 | `src/blk_flow.js` | 3D lattice-Boltzmann tunnel: solver, voxelised car, smoke streaklines, physics checks |
 | `src/blk_audio.js` | Sound engine (AudioWorklet engine voice from a firing table, electric motors, supercharger, gear whine) and music |
+| `src/blk_mech.js` | What is under the skin: engine, intake, manifolds, gearbox, shafts, exhaust and radiators, or motors, inverters and battery; wishbones, coil-overs, rack and anti-roll bars |
 | `src/blk_explode.js` | Parts store: the systems and their bays, the floor plan packed from the parts' sizes, the skin cut into panels along the shut lines, inner faces for one-sided surfaces, the overview camera, picking a part up to turn it in its own light |
 | `src/page.template.html` | Markup and styles |
 | `src/fonts.css` | `@font-face` rules for the self-hosted fonts (generated) |
@@ -99,7 +104,7 @@ node tools/drive.js                          # drives every model through the pr
 node tools/selfhost_check.js                 # fails if the built page fetches anything off-site
 node tools/hdr_check.js                      # fails if over-bright highlights turn into black blocks after bloom
 node tools/flow_check.js                     # airflow solver: drag of a square plate against the measured value, checks on the car's flow (--car=g8 for another model)
-node tools/explode.js                        # parts store: every model laid out and put together again (panels cover the skin, every part on the floor in its bay, none overlapping, a part picked up and let go, one system alone), then the buttons, a part picked up by a click, driving and airflow (--shots saves stills, --stills skips the clicks)
+node tools/explode.js                        # parts store: every model laid out and put together again (panels cover the skin, every part on the floor in its bay, none overlapping, the powertrain and suspension under the skin and over the floor, a part picked up and let go, one system alone), then the buttons, a part picked up by a click, driving and airflow (--shots saves stills, --stills skips the clicks)
 CAR=e4 VIEWS=front34,side node tools/shot.js out/e4   # stills of a model
 ```
 
