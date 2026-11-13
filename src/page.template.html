@@ -194,7 +194,7 @@ body.land-on .hud-lap { display: flex; }
 .minimap {
   position: fixed;
   left: var(--gutter-l); margin-left: 6px;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 78px);
   width: 150px; height: 150px;
   pointer-events: none;
   opacity: 0; transition: opacity .5s ease;
@@ -239,6 +239,8 @@ body.is-ready.drive-idle #scene { cursor: none; }
 .touch { position: fixed; inset: 0; display: none; pointer-events: none; touch-action: none; z-index: 2; }
 body.touch-on .touch { display: block; }
 body.touch-on .rail, body.touch-on .keys { opacity: 0 !important; pointer-events: none; }
+body.touch-on .mark-models { visibility: hidden; }
+body.touch-on .minimap { left: auto; bottom: auto; right: var(--gutter-r); top: calc(env(safe-area-inset-top, 0px) + 58px); width: 104px; height: 104px; }
 .touch-steer { position: absolute; left: 0; bottom: 0; width: 46%; height: 62%; pointer-events: auto; display: grid; place-items: end center; padding-bottom: 46px; box-sizing: border-box; }
 .touch-knob { width: 150px; height: 46px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--glass); position: relative; }
 .touch-knob::after { content: ""; position: absolute; left: 50%; top: 50%; width: 34px; height: 34px; margin: -17px; border-radius: 50%; background: var(--ink); opacity: .85; }

@@ -308,7 +308,7 @@ function lgStadium(i) {
   const R = LG.road, s = i > R.n / 2 ? i - R.n : i;
   return lsmooth(LG_STADIUM[0] - 60, LG_STADIUM[0], s) * (1 - lsmooth(LG_STADIUM[1], LG_STADIUM[1] + 60, s));
 }
-function lgBuildLand(onStep) {
+function lgBuildLand() {
   const R = LG.road, N = LG.N, C = LG.CELL, HALF = LG.HALF;
   // coarse fields (16 m): distance to the road, and the guide surface through the road's elevations
   const n16 = 257, D16 = new Float32Array(n16 * n16), G16 = new Float32Array(n16 * n16);
@@ -326,7 +326,6 @@ function lgBuildLand(onStep) {
     D16[j * n16 + i] = Math.sqrt(dmin); G16[j * n16 + i] = sh / sw;
   }
   LG.D16 = D16;
-  if (onStep) onStep();
   const H = new Float32Array(N * N), o = {};
   const FLAT = LG.HW + LG.VERGE - LG.SKIRT - 0.5, lim = LG.HW + LG.VERGE;
   for (let j = 0; j < N; j++) {

@@ -31,7 +31,7 @@ function puff(g, cx, cy, cz, k = 0.75) {
   return g;
 }
 function treeGeometries() {
-  const rnd = lgRand(977), bark = [0.11, 0.075, 0.05];
+  const bark = [0.11, 0.075, 0.05];
   const G = [];
   // conifer: tiers of drooping boughs
   {
@@ -62,7 +62,6 @@ function treeGeometries() {
     G.push([mergeGeometries([puff(tint(g, 0.07, 0.115, 0.03, [2, 15, 0.45]), 0, 8.4, 0, 0.5), tint(new THREE.CylinderGeometry(0.14, 0.24, 2.6, 5).translate(0, 1.3, 0), ...bark)]),
       mergeGeometries([puff(tint(fg, 0.066, 0.108, 0.028, [2, 15, 0.45]), 0, 8.4, 0, 0.6), tint(new THREE.CylinderGeometry(0.16, 0.24, 2.4, 3).translate(0, 1.2, 0), ...bark)])]);
   }
-  void rnd;
   return G;
 }
 function sceneryMat(o = {}) {
@@ -133,7 +132,7 @@ function buildRocks() {
 }
 
 /* ---------- barriers ---------- */
-const _sp1 = {}, _sg = {};
+const _sp1 = {};
 function buildBarriers() {
   const R = LG.road, pos = [], col = [], uv = [], idx = [];
   // a strip along the road: rows of points (offset towards the road, height, colour, u-scale), joined along the run

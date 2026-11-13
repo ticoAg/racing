@@ -62,6 +62,8 @@ function freeKeys() {
     el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
     for (const b of el.querySelectorAll('[data-act]')) b.addEventListener('click', () => freeAction(b.dataset.act));
   }
+  // a finger on the screen brings up the pedals; a key or a gamepad takes them away again
+  window.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch' && state.pose === 'free' && !INPUT.touch.on) { INPUT.touch.on = true; showKeys(false); } }, true);
   // the pointer wakes the page's own controls, which step aside while the car is driven
   const wake = () => { INPUT.idle = 0; document.body.classList.remove('drive-idle'); };
   window.addEventListener('pointermove', wake); window.addEventListener('pointerdown', wake);
@@ -114,6 +116,7 @@ function freeEnter() {
   document.body.classList.add('is-driving');
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   INPUT.idle = 0;
+  if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches && INPUT.padT <= 0) INPUT.touch.on = true;
   showKeys(true);
   syncUI();
 }
@@ -159,7 +162,7 @@ function freeReset() {
   else { let bd = 1e18; for (let i = 0; i < R.n; i += 6) { const d2 = (R.x[i] - F.x) ** 2 + (R.z[i] - F.z) ** 2; if (d2 < bd) { bd = d2; s = i * R.ds; } } }
   const p = lgRoadPose(s, clamp(o.n || 0, -3, 3), o);
   freePlace(p.x, p.z, p.th);
-  F.drift.score = 0; F.wetT = 0;
+  DRIVE.gear = 1; F.drift.score = 0; F.wetT = 0;
   CHASE.blend = 0; CHASE.init = false;
   toast('回到路面');
 }
@@ -186,7 +189,7 @@ function freeSnap() {
 }
 
 /* ---------- a camera that follows ---------- */
-const CHASE = { yaw: 0, y: 0, dist: 1, far: false, orbit: 0, tilt: 0, stick: 0, dragT: 9, fov: 56, init: false, blend: 0, from: null,
+const CHASE = { yaw: 0, y: 0, dist: 1, far: false, orbit: 0, tilt: 0, stick: 0, dragT: 9, fov: 56, init: false, blend: 0,
   pos: new V3(-6.4, 1.9, 0), tgt: new V3(0.4, 1, 0), q: new THREE.Quaternion(), m: new THREE.Matrix4(), up: new V3(0, 1, 0), fq: new THREE.Quaternion(), fp: new V3(), ffov: 30 };
 const _cg = {};
 function chaseUpdate(dt, snap) {
@@ -218,6 +221,8 @@ function chaseUpdate(dt, snap) {
   C.pos.set(px, py - y0, pz);
   C.tgt.set(cx + 1.2, 1.3, 0);
   C.fov = (C.far ? 52 : 56) + 14 * sstep(15, 105, V);
+  // (an upright screen is given the same width of view as it can)
+  if (camera.aspect < 1) C.fov = Math.min(88, DEG(2 * Math.atan(Math.tan(RAD(C.fov / 2)) / Math.pow(camera.aspect, 0.7))));
   C.q.setFromRotationMatrix(C.m.lookAt(C.pos, C.tgt, C.up));
   if (C.blend > 0) C.blend = snap ? 0 : Math.max(0, C.blend - dt / 1.5);
 }

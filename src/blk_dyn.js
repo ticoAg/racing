@@ -18,15 +18,14 @@ const FREE = {
   zb: 0, zbV: 0, pitch: 0, pitchV: 0, roll: 0, rollV: 0,   // sprung body: height, nose-up pitch, right-side-down roll
   delta: 0, steer: 0, thr: 0, brk: 0, hb: 0, rev: false, revT: 0, keyT: 0, keyD: 0,
   absF: 1, absR: 1, tc: 1, upT: 0, split: 0.4,
-  air: 0, airT: 0, landV: 0, ax: 0, ay: 0, hit: 0, hitSide: 0, scrape: 0, wet: 0, wetT: 0, sq: 0, loose: 0, rough: 0, esc: 0,
+  air: 0, airT: 0, landV: 0, ax: 0, ay: 0, hit: 0, scrape: 0, wet: 0, wetT: 0, sq: 0, loose: 0, rough: 0, esc: 0,
   s: 0, n: 0, onRoad: false, roadI: -1, surf: 0, offT: 0,
   wheels: [], assist: { tcs: true, abs: true, steer: true },
   // what the picture needs: scene origin on the map, the plane the wheels stand on, the body on its springs
   view: { x: 0, z: 0, y: 0, pitch: 0, roll: 0, e: [0, 0, 0, 0] },
-  lap: { t: 0, on: false, last: 0, best: 0, n: 0, next: 0, split: [], gates: 4, valid: true },
-  drift: { score: 0, total: 0, t: 0, hold: 0, angle: 0, best: 0, banked: 0 },
-  trap: { v: 0, t: 0, best: 0 }, air1: { t: 0, best: 0 },
-  odo: 0, top: 0,
+  lap: { t: 0, on: false, last: 0, best: 0, n: 0, next: 0, split: [], gates: 4 },
+  drift: { score: 0, t: 0, hold: 0, banked: 0 },
+  trap: { v: 0, t: 0 }, air1: { t: 0 },
 };
 const DYN = { V0: 2.5, C: 1.3, B: Math.tan(Math.PI / 2.6), kp: 0.1, ap: 0.13, DMAX: 0.6 };
 DYN.BC = DYN.B * DYN.C;
@@ -316,7 +315,7 @@ function dynImpact(px, py, nx, nz, depth, e, mu) {
 function dynCollide(dt) {
   const F = FREE, D = DYN, R = LG.road;
   const cs = Math.cos(F.th), sn = Math.sin(F.th);
-  let worst = 0, scrape = 0, side = 0;
+  let worst = 0, scrape = 0;
   // the four corners of the body against the barriers beside the road
   if (lgRoadAt(F.x, F.z, _dr, F.roadI)) {
     F.roadI = _dr.i; F.s = _dr.s; F.n = _dr.n; F.onRoad = Math.abs(_dr.n) < LG.HW + 0.6;
@@ -334,7 +333,7 @@ function dynCollide(dt) {
         if (pen <= 0 || pen > 2.2) continue;
         const th = R.th[_dr.i], k = inside ? -sd : sd;
         const v = dynImpact(px, py, -Math.sin(th) * k, Math.cos(th) * k, pen, 0.12, 0.22);
-        worst = Math.max(worst, v); side = sd;
+        worst = Math.max(worst, v);
         scrape = Math.max(scrape, Math.min(1, Math.hypot(F.u, F.w) / 30));
       }
     }
@@ -361,7 +360,7 @@ function dynCollide(dt) {
   if (Math.abs(F.x) > lim) worst = Math.max(worst, dynImpact(0, 0, -Math.sign(F.x), 0, Math.abs(F.x) - lim, 0.1, 0.2));
   if (Math.abs(F.z) > lim) worst = Math.max(worst, dynImpact(0, 0, 0, -Math.sign(F.z), Math.abs(F.z) - lim, 0.1, 0.2));
   F.scrape += (scrape - F.scrape) * Math.min(1, dt * 12);
-  if (worst > 0.8) { F.hit = Math.min(1.5, worst / 12); F.hitSide = side; ev('bump', { axle: 'f', k: Math.min(2.2, 0.6 + worst / 6) }); if (worst > 2) DRIVE.sparkBurst += Math.min(60, worst * 5) * (scrape > 0 ? 1 : 0.3); }
+  if (worst > 0.8) { F.hit = Math.min(1.5, worst / 12); ev('bump', { axle: 'f', k: Math.min(2.2, 0.6 + worst / 6) }); if (worst > 2) DRIVE.sparkBurst += Math.min(60, worst * 5) * (scrape > 0 ? 1 : 0.3); }
 }
 
 /* ---------- the controls ---------- */
@@ -461,7 +460,6 @@ function autoDrive(raw) {
 }
 
 /* ---------- per frame ---------- */
-const _dAir = { f: 0, r: 0, drag: 0 };
 function freeAdvance(dt, raw) {
   const F = FREE, d = DRIVE, W = F.wheels;
   dynControls(dt, raw);
@@ -483,7 +481,7 @@ function freeAdvance(dt, raw) {
   // jumps and landings
   if (F.air === 4) { F.airT += dt; F.landV = Math.max(F.landV, -F.zbV); }
   else {
-    if (wasAir && F.airT > 0.18) { const k = clamp(F.landV / 3, 0.3, 2.2); ev('bump', { axle: 'f', k }); ev('bump', { axle: 'r', k }); F.hit = Math.max(F.hit, k * 0.5); if (F.airT > F.air1.best) F.air1.best = F.airT; F.air1.t = F.airT; }
+    if (wasAir && F.airT > 0.18) { const k = clamp(F.landV / 3, 0.3, 2.2); ev('bump', { axle: 'f', k }); ev('bump', { axle: 'r', k }); F.hit = Math.max(F.hit, k * 0.5); F.air1.t = F.airT; }
     F.airT = 0; F.landV = 0;
   }
   // the floor on the road throws sparks
@@ -503,7 +501,6 @@ function freeAdvance(dt, raw) {
   let sq = 0, loose = 0, rough = 0;
   for (let i = 0; i < 4; i++) { const q = W[i]; if (q.F > 0) { if (q.surf < 2) sq = Math.max(sq, q.slip); else if (q.surf < 6) loose += 0.25; rough += LG_SURF[q.surf].rough / 0.03 / 4; } }
   F.sq += (sq - F.sq) * Math.min(1, dt * 14); F.loose += (loose - F.loose) * Math.min(1, dt * 8); F.rough = rough;
-  F.odo += V * dt; if (V > F.top) F.top = V;
   freeView();
   freeScore(dt);
 }
@@ -543,12 +540,12 @@ function freeScore(dt) {
   // drifting: the body at an angle to where it is going, on the road, at speed
   const D = F.drift, beta = Math.atan2(F.w, Math.max(1, Math.abs(F.u)));
   const sliding = Math.abs(beta) > 0.16 && V > 11 && F.air < 2 && F.u > 0 && F.surf < 2;
-  if (sliding) { D.score += Math.abs(beta) * V * dt * 6; D.hold = 1.6; D.angle = beta; D.t += dt; }
-  else if (D.hold > 0) { D.hold -= dt; if (D.hold <= 0) { if (D.score > 40) { D.banked = Math.round(D.score); D.total += D.banked; D.best = Math.max(D.best, D.banked); D.show = 3; } D.score = 0; D.t = 0; } }
+  if (sliding) { D.score += Math.abs(beta) * V * dt * 6; D.hold = 1.6; D.t += dt; }
+  else if (D.hold > 0) { D.hold -= dt; if (D.hold <= 0) { if (D.score > 40) { D.banked = Math.round(D.score); D.show = 3; } D.score = 0; D.t = 0; } }
   if (F.hit > 0.3 && D.score > 0) { D.score = 0; D.hold = 0; D.t = 0; }
   D.show = Math.max(0, (D.show || 0) - dt);
   // the speed trap two thirds of the way down the main straight
   const T = F.trap, sT = 420;
-  if (F.roadI >= 0 && T.prevS !== undefined && T.prevS < sT && F.s >= sT && F.s - T.prevS < 30) { T.v = V * 3.6; T.best = Math.max(T.best, T.v); T.t = 4; }
+  if (F.roadI >= 0 && T.prevS !== undefined && T.prevS < sT && F.s >= sT && F.s - T.prevS < 30) { T.v = V * 3.6; T.t = 4; }
   T.prevS = F.s; T.t = Math.max(0, T.t - dt);
 }

@@ -11,8 +11,7 @@
 const LAND = {
   built: false, building: null, group: null, tod: 'dusk',
   terrain: [], road: null, sky: null, water: null, sun: null, env: null, envScene: null,
-  shadeCPU: null, carSh: null, shCam: null, shMat: null, hide: [],
-  chunks: [], lastLod: [1e9, 1e9], trees: [], props: {},
+  shadeCPU: null, carSh: null, shCam: null, shMat: null, casters: [], lastLod: [1e9, 1e9],
 };
 // times of day: where the sun stands (elevation, azimuth clockwise from east, in degrees) and what it lights with
 const LAND_TOD = {
@@ -25,12 +24,12 @@ const LU = {
   uSunDir: { value: new V3(0, 1, 0) }, uSunCol: { value: new THREE.Color() }, uSkyCol: { value: new THREE.Color() }, uGndCol: { value: new THREE.Color() },
   uZen: { value: new THREE.Color() }, uHor: { value: new THREE.Color() }, uGlow: { value: new THREE.Color() }, uLFog: { value: new THREE.Color() }, uLFogSun: { value: new THREE.Color() },
   uCloud: { value: new THREE.Color() }, uCloudDark: { value: new THREE.Color() }, uCover: { value: 0.5 }, uLFogD: { value: 0.0004 }, uNightK: { value: 0 },
-  uToLand: { value: new THREE.Matrix3() }, uCarPos: { value: new V3() }, uLTime: { value: 0 },
+  uToLand: { value: new THREE.Matrix3() }, uLTime: { value: 0 },
   tH: { value: null }, tNrm: { value: null }, tBio: { value: null }, tShade: { value: null }, tCarSh: { value: null }, tContact: { value: null },
   uShMat: { value: new THREE.Matrix4() }, uContactScale: { value: new THREE.Vector2(1 / SHW, 1 / SHD) }, uLapL: { value: 1 },
 };
 const GLSL_LAND = GLSL_WORLD + `
-uniform vec3 uSunDir, uSunCol, uSkyCol, uGndCol, uZen, uHor, uGlow, uLFog, uLFogSun, uCloud, uCloudDark, uCarPos;
+uniform vec3 uSunDir, uSunCol, uSkyCol, uGndCol, uZen, uHor, uGlow, uLFog, uLFogSun, uCloud, uCloudDark;
 uniform float uCover, uLFogD, uNightK, uLTime, uLapL;
 uniform mat3 uToLand;
 uniform mat4 uShMat;
@@ -183,7 +182,7 @@ function landShade() {
     }
   };
   for (let i = 0; i < T.n; i++) { const s = T.s[i], k = T.kind[i]; blob(T.x[i], T.z[i], (k === 0 ? 2.1 : k === 1 ? 3.4 : 1.6) * s, (k === 0 ? 11 : k === 1 ? 8.5 : 15) * s, 0.86); }
-  for (const b of LAND.casters || []) blob(b[0], b[1], b[2], b[3], 0.9);
+  for (const b of LAND.casters) blob(b[0], b[1], b[2], b[3], 0.9);
   LAND.shadeCPU = S;
   if (LU.tShade.value) LU.tShade.value.dispose();
   const t = new THREE.DataTexture(S, n, n, THREE.RedFormat);
@@ -546,7 +545,6 @@ function updateLand(dt, snap) {
   g.updateMatrixWorld(true);
   LAND.sky.position.set(v.x, v.y - 60, v.z);
   LU.uToLand.value.set(cs, 0, -sn, 0, 1, 0, sn, 0, cs);
-  LU.uCarPos.value.set(v.x, v.y, v.z);
   if (!snap) LU.uLTime.value += dt;
   WU.uHeadI.value = (state.lights ? 1 : 0) * LAND.headK;
   WU.uV.value = FREE.u; WU.uVz.value = FREE.w; WU.uW.value = FREE.r; WU.uBlur.value = Math.abs(FREE.u) * EXPO;
