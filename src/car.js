@@ -2188,7 +2188,8 @@ const CABINS = [
   { id: 'ivory', name: '象牙白', seat: '#d6cfbf', accent: '#0b2f86', card: '#8f897c', well: '#2a2824', stitch: '#0b2f86', harness: '#0b2f86', suede: '#26262a', led: '#5aa8ff' },
 ];
 // the model the page opens with: ?car=<id>
-const START_MODEL = modelById(new URLSearchParams(location.search).get('car'));
+const QUERY = new URLSearchParams(location.search);
+const START_MODEL = modelById(QUERY.get('car'));
 let PRESETS = START_MODEL.presets;
 /*@include blk_drive.js*/
 
@@ -2205,11 +2206,15 @@ const wideScreen = () => window.innerWidth >= 900;
 // the panel docks at the side on desktops and landscape tablets, and becomes a bottom sheet on phones
 const SHEET_MQ = window.matchMedia('(max-width: 899px) and (max-aspect-ratio: 5/4), (max-width: 639px)');
 const sheetLayout = () => SHEET_MQ.matches;
-const state = Object.assign({}, PRESETS[0], {
+/*@include blk_agent.js*/
+// the configuration it opens in: the model's first preset, and over it what the address names (?paint=lava&finish=matte)
+const START_CONFIG = Object.fromEntries(CONFIG_KEYS.map((k) => [k, QUERY.get(k)]).filter(([k, v]) => OPTIONS[k].some((o) => o.id === v)));
+const state = Object.assign({}, PRESETS[0], START_CONFIG, {
   model: START_MODEL.id, preset: 0, doors: false, wingUp: true, lights: true, explode: false, apart: {}, pose: 'park', view: 'front', tab: 'style',
   turntable: !reduceMotion && !window.__TEST__, panel: !window.__TEST__ && wideScreen(),
 });
 delete state.name;
+state.preset = PRESETS.findIndex((p) => CONFIG_KEYS.every((k) => p[k] === state[k]));
 let paintAnim = null, camAnim = null, doorAnim = null;
 let doorOpen = 0, wingDeploy = 1, viewShift = 0, pull = 1, shadowDirty = 0, frameNo = 0;
 
@@ -2496,8 +2501,9 @@ function disposeModel() {
 }
 
 // the name in the header, the page title, the canvas label
+const PAGE_TITLE = document.title;
 function showModel(m = SPEC) {
-  document.title = 'Halcyon ' + m.name;
+  document.title = PAGE_TITLE.replace(/^Halcyon\b/, 'Halcyon ' + m.name);
   const mk = document.querySelector('.mark'); if (mk) mk.setAttribute('aria-label', 'Halcyon ' + m.name);
   canvas.setAttribute('aria-label', `工作室中的 Halcyon ${m.name}。拖动旋转，滚轮或双指缩放。`);
   const vn = document.getElementById('veilName'); if (vn) vn.innerHTML = `<b>${m.mark[0]}</b>${m.mark[1]}`;
@@ -2792,6 +2798,7 @@ async function build() {
   if (document.fonts) document.fonts.ready.then(() => fitRail());
   if (window.__TEST__) console.info('build ms', Math.round(performance.now() - t0));
   window.__ready = true;
+  registerAgentTools();
   needsRender = true;
   pull = panelPull();
   const hero = viewTarget('front');

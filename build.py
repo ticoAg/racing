@@ -2,12 +2,14 @@
 
 public/index.html                    page with all app code inlined
 public/vendor/three@<ver>/...        only the three.js modules the page imports (from node_modules)
-public/fonts/                        subset fonts, committed (see tools/subset_fonts.py)
+public/fonts/, public/img/           subset fonts (see tools/subset_fonts.py) and pictures (tools/og.js), committed
+public/models/, guide/, tech/, en/   the reading pages, each with its Markdown twin; sitemap.xml, llms.txt (build_site.py)
 dev/test.html, dev/live.html         same page with window.__TEST__ hooks / plain, for tools/*.js
 
 Requires `npm install` (or `npm ci`) first so node_modules/three exists.
 """
 import json, os, re, shutil
+import build_site
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(ROOT, 'src')
@@ -68,25 +70,27 @@ preload = '\n'.join(
     for u in re.findall(r'url\("([^"]+)"\)', fonts_css) if 'italic' not in u)
 preload += f'\n<link rel="modulepreload" href="{VBASE}build/three.module.js">'
 
+# ---- head, structured data and the text inside the canvas: the same source as the reading pages ----
+VERSION = json.loads(read(os.path.join(ROOT, 'package.json')))['version']
+app_head, app_text = build_site.app_parts(VERSION)
+
 tpl = read(os.path.join(SRC, 'page.template.html'))
 def page(test=False):
     body = (tpl.replace('__IMPORTMAP__', json.dumps(importmap))
+               .replace('__FALLBACK__', app_text)
                .replace('__PRELOAD__', preload)
                .replace('__FONTS__', fonts_css)
                .replace('__SCRIPT__', js)
                .replace('__TESTFLAG__', '<script>window.__TEST__ = true;</script>' if test else ''))
     head, rest = body.split('<style>', 1)
-    return ('<!doctype html>\n<html lang="zh-CN">\n<head>\n<meta charset="utf-8">\n'
-            '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
-            '<meta name="description" content="Halcyon — 原创程序化跑车系列 H9 / G8 / E4 / R10 配置器（three.js）">\n'
-            '<meta name="theme-color" content="#0c0d10">\n'
-            + head + '<style>' + rest.replace('</style>', '</style>\n</head>\n<body>', 1) + '\n</body>\n</html>\n')
+    return (app_head + '\n' + head + '<style>' + rest.replace('</style>', '</style>\n</head>\n<body>', 1) + '\n</body>\n</html>\n')
 
 write(os.path.join(PUB, 'index.html'), page())
 write(os.path.join(ROOT, 'dev', 'test.html'), page(test=True))
 write(os.path.join(ROOT, 'dev', 'live.html'), page())
+pages = build_site.run(VERSION, fonts_css)
 size = sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(os.path.join(PUB, 'vendor')) for f in fs)
 print(f'built public/index.html ({os.path.getsize(os.path.join(PUB, "index.html")) // 1024} KB), '
-      f'vendored {len(seen)} three.js modules ({size // 1024} KB)')
+      f'vendored {len(seen)} three.js modules ({size // 1024} KB), wrote {pages} pages with their Markdown twins')
 for rel in sorted(seen):
     print('  ', rel)

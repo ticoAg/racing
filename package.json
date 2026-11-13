@@ -11,7 +11,8 @@
     "test:drive": "node tools/drive.js",
     "test:sim": "node tools/sim.js",
     "test:free": "node tools/free.js",
-    "test:explode": "node tools/explode.js"
+    "test:explode": "node tools/explode.js",
+    "test:site": "node tools/site.js"
   },
   "devDependencies": {
     "three": "0.170.0"

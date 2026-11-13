@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "include": ["/", "/models/*", "/guide/*", "/tech/*", "/en/*"],
+  "exclude": []
+}
