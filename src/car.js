@@ -2095,7 +2095,13 @@ function renderContactShadow() {
 
 /*@include blk_track.js*/
 
+/*@include blk_landgen.js*/
+
 /*@include blk_world.js*/
+
+/*@include blk_land.js*/
+
+/*@include blk_scenery.js*/
 
 /* =========================================================================
    ASSEMBLY
@@ -2186,7 +2192,11 @@ const START_MODEL = modelById(new URLSearchParams(location.search).get('car'));
 let PRESETS = START_MODEL.presets;
 /*@include blk_drive.js*/
 
+/*@include blk_dyn.js*/
+
 /*@include blk_fx.js*/
+
+/*@include blk_free.js*/
 const CONFIG_KEYS = ['paint', 'finish', 'livery', 'wheel', 'rim', 'caliper', 'wing', 'kit', 'cabin'];
 const byId = (arr, id) => arr.find((o) => o.id === id) || arr[0];
 
@@ -2323,6 +2333,8 @@ const VIEWS = {
   wheel: [[2.55, 0.62, 2.8], [1.38, 0.36, 0.86]],
   cabin: [[-0.95, 1.4, 2.25], [0.15, 0.55, 0.05]],
   driver: [[-0.345, 0.905, -0.31], [-0.29, 0.896, -0.309]],
+  // (behind the car, following it: the camera of blk_free.js)
+  chase: [[-6.6, 1.9, 0], [0.7, 1.0, 0]],
 };
 const DEG = THREE.MathUtils.radToDeg, RAD = THREE.MathUtils.degToRad;
 // [tan(vfov/2), distance factor] that frames the car in a canvas of aspect a
@@ -2383,7 +2395,16 @@ function viewTarget(name) {
 function goView(name, dur = 1.25) {
   const from = state.view;
   xplDrop(false);
+  // leaving the following camera: the orbit camera takes over from where that one is
+  if (from === 'chase' && name !== 'chase') { camAnim = null; camera.position.copy(CHASE.pos); controls.target.copy(CHASE.tgt); camera.fov = CHASE.fov; camera.updateProjectionMatrix(); }
   state.view = name;
+  if (name === 'chase') {
+    if (from !== 'chase') chaseFrom();
+    camAnim = null; state.explode = false;
+    if (state.turntable) setTurntable(false);
+    viewLimits(name); syncUI(); needsRender = true;
+    return;
+  }
   if (name === 'cabin' && !state.doors && !(state.explode && state.apart.doors)) setDoors(true);
   if (name === 'driver' && state.turntable) setTurntable(false);
   if (name === 'driver') state.explode = false;
@@ -2510,6 +2531,8 @@ async function setModel(id) {
   const aero = AERO.on;
   if (AERO.saved) setPressureView(false);
   state.pose = 'park';
+  if (FREE.on) freeLeave(true);
+  FREE.placed = false; WORLD.kind = 'track';
   restDrive();
   WORLD.mix = WORLD.target = 0;
   disposeModel();
@@ -2764,6 +2787,7 @@ async function build() {
   setLights(state.lights);
   renderContactShadow();
   buildUI();
+  freeKeys(); chasePointer();
   showModel();
   if (document.fonts) document.fonts.ready.then(() => fitRail());
   if (window.__TEST__) console.info('build ms', Math.round(performance.now() - t0));
@@ -2877,6 +2901,8 @@ function stepWorld(dt, snap) {
   const t = clock.elapsedTime;
   let active = updateDrive(dt, t, snap);
   active = updateWorld(dt, snap) || active;
+  if (state.view === 'chase') chaseUpdate(dt, snap);
+  updateFreeHUD(dt, t);
   active = updateFX(dt, t, snap) || active;
   active = updateAero(dt, snap) || active;
   active = updateDoors(dt, snap) || active;
@@ -2924,6 +2950,7 @@ function loop() {
     if (paintAnim.t >= 1) paintAnim = null;
     active = true;
   }
+  controls.enabled = state.view !== 'chase';
   controls.autoRotate = state.turntable && !camAnim && !XPL.held;
   controls.autoRotateSpeed = 0.55;
   if (controls.update(dt)) needsRender = true;
@@ -2963,6 +2990,7 @@ window.__info = () => {
 };
 window.__cam = () => camera.fov;
 window.__ui = { setOption, applyPreset, setDoors, setWingUp, setPose, setLights, setExplode, setModule, goView, setPanel, setAero, setModel, state, DRIVE, AERO, FX, WORLD, TRACK, FLOW, XPL, BODY, MODELS, get SPEC() { return SPEC; },
+  FREE, LAND, LG, CHASE, INPUT, LU, landSetTod, freeAction, freeReset, lgRoadPose, lgGround,
   // a part picked up by its name, let go, and where its middle is in the picture (client px)
   pick: (key) => xplPick(XPL.items.find((it) => it.key === key)), drop: xplDrop,
   spot: (key) => { const it = XPL.items.find((i) => i.key === key), r = canvas.getBoundingClientRect(), v = it.c.clone().add(it.pos).project(camera); return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height]; },

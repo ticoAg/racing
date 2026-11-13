@@ -32,6 +32,7 @@ console.log({ length: +R.L.toFixed(1), samples: R.n, tightestRadius: +(1 / kmax)
   }
   for (let i = 0; i < R.n; i += 3) for (const off of [-14.4, 14.4]) { lgRoadPose(i * R.ds, off, p); if (lgLandH(p.x, p.z) < p.h - 1.0) gap++; }
   console.log('land above the road at', poke, 'of', n, 'points; verge edge above the land at', gap);
+  if (poke || gap) process.exitCode = 1;
   lgGround(LG.spawn.x, LG.spawn.z, g); console.log('spawn ground', g);
 }
 // picture

@@ -16,9 +16,9 @@ const LAND = {
 };
 // times of day: where the sun stands (elevation, azimuth clockwise from east, in degrees) and what it lights with
 const LAND_TOD = {
-  dusk: { name: '黄昏', el: 21, az: 205, sun: [3.3, 2.5, 1.62], sky: [0.2, 0.27, 0.42], gnd: [0.1, 0.085, 0.06], zen: [0.1, 0.2, 0.46], hor: [0.62, 0.5, 0.42], glow: [1.5, 0.75, 0.28], fog: [0.5, 0.47, 0.48], fogSun: [1.05, 0.7, 0.42], fogD: 0.00042, cloud: [1.1, 0.86, 0.7], cloudDark: [0.3, 0.3, 0.4], cover: 0.5, head: 0.25 },
-  day: { name: '白天', el: 48, az: 150, sun: [3.3, 3.1, 2.8], sky: [0.26, 0.36, 0.56], gnd: [0.12, 0.11, 0.09], zen: [0.07, 0.2, 0.52], hor: [0.5, 0.62, 0.78], glow: [0.6, 0.55, 0.45], fog: [0.52, 0.62, 0.76], fogSun: [0.8, 0.8, 0.78], fogD: 0.00032, cloud: [1.05, 1.05, 1.05], cloudDark: [0.42, 0.46, 0.55], cover: 0.42, head: 0 },
-  night: { name: '夜晚', el: 34, az: 240, sun: [0.1, 0.13, 0.2], sky: [0.012, 0.017, 0.03], gnd: [0.004, 0.004, 0.005], zen: [0.004, 0.007, 0.018], hor: [0.02, 0.028, 0.045], glow: [0.05, 0.06, 0.09], fog: [0.012, 0.017, 0.028], fogSun: [0.03, 0.04, 0.06], fogD: 0.0006, cloud: [0.06, 0.07, 0.1], cloudDark: [0.008, 0.01, 0.016], cover: 0.4, head: 1 },
+  dusk: { name: '黄昏', el: 19, az: 205, sun: [4.4, 3.1, 1.8], sky: [0.2, 0.27, 0.42], gnd: [0.1, 0.085, 0.06], zen: [0.07, 0.15, 0.38], hor: [0.44, 0.36, 0.33], glow: [1.25, 0.55, 0.2], fog: [0.36, 0.34, 0.37], fogSun: [0.95, 0.56, 0.3], fogD: 0.00027, cloud: [1.0, 0.72, 0.52], cloudDark: [0.2, 0.2, 0.3], cover: 0.5, head: 0.06 },
+  day: { name: '白天', el: 48, az: 150, sun: [3.3, 3.1, 2.8], sky: [0.24, 0.34, 0.54], gnd: [0.12, 0.11, 0.09], zen: [0.05, 0.16, 0.46], hor: [0.36, 0.5, 0.68], glow: [0.45, 0.42, 0.36], fog: [0.36, 0.47, 0.62], fogSun: [0.62, 0.64, 0.64], fogD: 0.00021, cloud: [0.92, 0.92, 0.92], cloudDark: [0.36, 0.4, 0.5], cover: 0.42, head: 0 },
+  night: { name: '夜晚', el: 34, az: 240, sun: [0.1, 0.13, 0.2], sky: [0.012, 0.017, 0.03], gnd: [0.004, 0.004, 0.005], zen: [0.004, 0.007, 0.018], hor: [0.02, 0.028, 0.045], glow: [0.05, 0.06, 0.09], fog: [0.012, 0.017, 0.028], fogSun: [0.03, 0.04, 0.06], fogD: 0.0005, cloud: [0.06, 0.07, 0.1], cloudDark: [0.008, 0.01, 0.016], cover: 0.4, head: 1 },
 };
 // shared by every shader of the land (with the world uniforms WU)
 const LU = {
@@ -66,8 +66,9 @@ float carShade(vec3 wp){
   float z = q.z * 0.5 + 0.5, s = 0.0;
   for (int i = 0; i < 4; i++) {
     vec2 o = vec2(i == 0 || i == 3 ? -1.0 : 1.0, i < 2 ? -1.0 : 1.0) * 0.0021;
+    // (coverage is smoothed by the filter; the depth under it is the stored one over the coverage)
     vec4 t = texture2D(tCarSh, uv + o);
-    s += t.a * step(t.r + 0.012, z);
+    s += smoothstep(0.25, 0.75, t.a) * step(t.r / max(t.a, 0.05) + 0.012, z);
   }
   return 1.0 - 0.25 * s;
 }
@@ -82,7 +83,8 @@ float headBeam(vec3 wp){
     vec3 L = wp - vec3(2.15, 0.46, i == 0 ? -0.66 : 0.66);
     if (L.x < 0.6) continue;
     float d2 = dot(L, L), lat = (L.z - 0.08 * L.x * sign(L.z)) / L.x;
-    E += exp(-lat * lat / 0.05) * smoothstep(1.0, 9.0, L.x) * 0.46 / (d2 * sqrt(d2)) * 90.0;
+    // (out here they are the only light at night: they fall off with the square of the distance and reach far)
+    E += exp(-lat * lat / 0.07) * smoothstep(1.0, 7.0, L.x) * 62.0 / d2;
   }
   return E;
 }
@@ -237,15 +239,25 @@ function landTerrainMat() {
       vec3 alb = grassCol(xz, fine);
       // tufts and blades close to the eye
       alb *= 1.0 + fine * 0.35 * (vnoise(xz * vec2(7.0, 2.3)) - 0.5);
+      // farmland on the low, level ground: fields of different crops worked in rows, hedges between them
+      vec2 fp = xz / 170.0 + vec2(vnoise(xz / 430.0 + 1.3), vnoise(xz / 430.0 + 9.7)) * 1.5;
+      vec2 fc = floor(fp), ff = fract(fp);
+      float fh = hash12(fc), fedge = min(min(ff.x, 1.0 - ff.x), min(ff.y, 1.0 - ff.y));
+      float farm = smoothstep(0.42, 0.6, vnoise(xz / 610.0 + 4.2)) * (1.0 - smoothstep(48.0, 70.0, h)) * smoothstep(0.975, 0.992, N.y) * (1.0 - smoothstep(0.15, 0.45, bio.g)) * step(L_WATER + 2.5, h);
+      float fa = fh * 6.2832, rows = 0.5 + 0.5 * sin(dot(xz, vec2(cos(fa), sin(fa))) * 3.6);
+      vec3 crop = fh < 0.3 ? vec3(0.27, 0.215, 0.085) : fh < 0.52 ? vec3(0.085, 0.15, 0.04) : fh < 0.68 ? vec3(0.15, 0.115, 0.075) : fh < 0.8 ? vec3(0.3, 0.27, 0.05) : alb;
+      crop *= 0.86 + 0.28 * n2 + (rows - 0.5) * 0.3 * fine * step(fh, 0.8);
+      alb = mix(alb, crop, farm * smoothstep(0.012, 0.03, fedge));
+      alb = mix(alb, vec3(0.03, 0.052, 0.02), farm * (1.0 - smoothstep(0.008, 0.02, fedge)) * 0.9);
       alb = mix(alb, vec3(0.034, 0.055, 0.022) * (0.75 + 0.5 * n2), bio.g * 0.85);
       vec3 earth = mix(vec3(0.15, 0.11, 0.07), vec3(0.23, 0.18, 0.115), n4) * (0.85 + 0.3 * vnoise(xz / 1.3) * fine);
       alb = mix(alb, earth, smoothstep(0.25, 0.75, bio.r + (n2 - 0.5) * 0.3));
       float steep = smoothstep(0.82, 0.62, N.y + (n4 - 0.5) * 0.12);
-      vec3 rock = mix(vec3(0.15, 0.14, 0.135), vec3(0.3, 0.27, 0.24), vnoise(vec2(xz.x / 23.0 + h * 0.11, h * 0.35 + xz.y / 31.0))) * (0.8 + 0.4 * vnoise(xz / 4.1));
+      vec3 rock = mix(vec3(0.085, 0.08, 0.078), vec3(0.19, 0.17, 0.15), vnoise(vec2(xz.x / 23.0 + h * 0.11, h * 0.21 + xz.y / 31.0) + 3.0 * vnoise(xz / 90.0))) * (0.8 + 0.4 * vnoise(xz / 4.1));
       alb = mix(alb, rock, max(steep, smoothstep(0.35, 0.9, bio.b)));
       alb = mix(alb, vec3(0.4, 0.34, 0.235) * (0.9 + 0.2 * n2), bio.a);
       float snow = smoothstep(265.0, 330.0, h + 50.0 * n4) * smoothstep(0.55, 0.8, N.y);
-      alb = mix(alb, vec3(0.7, 0.73, 0.78), snow);
+      alb = mix(alb, vec3(0.42, 0.44, 0.48), snow);
       // under the lake
       float deep = clamp((L_WATER - h) / 4.0, 0.0, 1.0);
       alb = mix(alb, alb * vec3(0.3, 0.5, 0.5), deep);
@@ -396,7 +408,7 @@ function skyMaterial(env) {
   });
 }
 function buildSky() {
-  const m = new THREE.Mesh(new THREE.SphereGeometry(1450, 48, 24), skyMaterial(false));
+  const m = new THREE.Mesh(new THREE.SphereGeometry(5000, 48, 24), skyMaterial(false));
   m.renderOrder = -9; m.frustumCulled = false;
   LAND.group.add(m); LAND.sky = m;
 }
@@ -442,7 +454,7 @@ function landSetTod(id) {
   landShade();
   landEnv();
   if (LAND.sun) LAND.sun.color.setRGB(T.sun[0], T.sun[1], T.sun[2]).multiplyScalar(1 / Math.max(...T.sun));
-  LAND.sunI = Math.max(...T.sun) * Math.PI * 0.8;
+  LAND.sunI = Math.max(...T.sun) * Math.PI * 0.62;
   needsRender = true;
 }
 // what the car's paint reflects out here: the sky as it is, over lit ground
@@ -520,12 +532,15 @@ function updateLand(dt, snap) {
   if (!LAND.built) return false;
   const m = WORLD.mix, on = WORLD.kind === 'land' && m > 0;
   LAND.group.visible = on;
-  if (!on) { LAND.sun.intensity = 0; return false; }
+  // out here the eye reaches kilometres: the far plane goes out, and the near one too unless the camera is in the car
+  const far = on ? 5600 : 1600, near = on && state.view !== 'driver' && state.view !== 'cabin' ? 0.3 : 0.05;
+  if (camera.far !== far || camera.near !== near) { camera.far = far; camera.near = near; camera.updateProjectionMatrix(); }
+  if (!on) { LAND.sun.intensity = 0; scene.environmentRotation.y = 0; bloom.strength = 0.3; bloom.threshold = 0.96; return false; }
   const v = FREE.view, th = FREE.th, cs = Math.cos(th), sn = Math.sin(th), g = LAND.group;
   g.rotation.y = th;
   g.position.set(-(cs * v.x + sn * v.z), -v.y, -(-sn * v.x + cs * v.z));
   g.updateMatrixWorld(true);
-  LAND.sky.position.set(v.x, v.y - 30, v.z);
+  LAND.sky.position.set(v.x, v.y - 60, v.z);
   LU.uToLand.value.set(cs, 0, -sn, 0, 1, 0, sn, 0, cs);
   LU.uCarPos.value.set(v.x, v.y, v.z);
   if (!snap) LU.uLTime.value += dt;
@@ -539,7 +554,9 @@ function updateLand(dt, snap) {
   const shade = 1 - 0.85 * landShadeAt(v.x, v.z);
   LAND.shadeK = snap || LAND.shadeK === undefined ? shade : LAND.shadeK + (shade - LAND.shadeK) * (1 - Math.exp(-dt * 14));
   LAND.sun.intensity = LAND.sunI * m * LAND.shadeK;
-  scene.environmentRotation.y = th;
+  // daylight is bright everywhere: only the sun itself and its glints are left to bloom
+  bloom.strength = lerp(0.3, 0.13, m); bloom.threshold = lerp(0.96, 1.5, m);
+  scene.environmentRotation.y = (th - Math.round(th / (2 * Math.PI)) * 2 * Math.PI) * sstep(0, 1, m);
   renderCarShadow();
   return true;
 }

@@ -115,13 +115,13 @@ function respawnSpeck(i, x) {
 }
 function updateSpecks(dt) {
   const vis = WORLD.mix > 0.01;
-  FX.specks.visible = vis;
+  FX.specks.visible = vis && !(WORLD.kind === 'land' && LAND.headK < 0.2);
   if (!vis) return;
-  const P = FX.speckP, pa = FX.specks.geometry.attributes.position.array, v = DRIVE.v, k = DRIVE.k, T = EXPO;
+  const P = FX.speckP, pa = FX.specks.geometry.attributes.position.array, gx = DRIVE.gvx, gz = DRIVE.gvz, gw = DRIVE.gw, T = EXPO;
   for (let i = 0; i < SPECK_N; i++) {
     let x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2];
     // fixed to the ground, seen from the turning car, plus a little drift of their own
-    const vx = -v + v * k * z, vz = -v * k * x;
+    const vx = -gx + gw * z, vz = -gz - gw * x;
     x += vx * dt; z += vz * dt; y += Math.sin(i * 1.7 + x * 0.3) * 0.05 * dt;
     if (x < SPECK_BOX[0] || x > SPECK_BOX[1] + 5 || z < SPECK_BOX[4] - 4 || z > SPECK_BOX[5] + 4) { respawnSpeck(i, x < SPECK_BOX[0] ? SPECK_BOX[1] : SPECK_BOX[0] + rand() * 5); x = P[i * 3]; y = P[i * 3 + 1]; z = P[i * 3 + 2]; }
     P[i * 3] = x; P[i * 3 + 1] = y; P[i * 3 + 2] = z;
@@ -133,51 +133,70 @@ function updateSpecks(dt) {
   FX.specks.geometry.attributes.position.needsUpdate = true;
 }
 
-/* ---------- tyre smoke ---------- */
-const SMOKE_N = 90;
+/* ---------- tyre smoke, and the dust a car raises off the road ---------- */
+const SMOKE_N = 260;
 function buildSmoke() {
   const g = new THREE.InstancedBufferGeometry().copy(new THREE.PlaneGeometry(1, 1));
   g.instanceCount = SMOKE_N;
   const a = new THREE.InstancedBufferAttribute(new Float32Array(SMOKE_N * 4), 4).setUsage(THREE.DynamicDrawUsage);
-  const b = new THREE.InstancedBufferAttribute(new Float32Array(SMOKE_N * 2), 2).setUsage(THREE.DynamicDrawUsage);
+  const b = new THREE.InstancedBufferAttribute(new Float32Array(SMOKE_N * 3), 3).setUsage(THREE.DynamicDrawUsage);
   g.setAttribute('aP', a); g.setAttribute('aA', b);
-  FX.smokeS = { p: new Float32Array(SMOKE_N * 3), v: new Float32Array(SMOKE_N * 3), age: new Float32Array(SMOKE_N).fill(9), life: new Float32Array(SMOKE_N).fill(1), n: 0, acc: 0 };
+  FX.smokeS = { p: new Float32Array(SMOKE_N * 3), v: new Float32Array(SMOKE_N * 3), age: new Float32Array(SMOKE_N).fill(9), life: new Float32Array(SMOKE_N).fill(1), kind: new Float32Array(SMOKE_N), op: new Float32Array(SMOKE_N), n: 0, acc: [0, 0, 0, 0, 0] };
+  FX.smokeLit = { value: new THREE.Color(1, 1, 1) };
   FX.smoke = new THREE.Mesh(g, new THREE.ShaderMaterial({
-    uniforms: WU, transparent: true, depthWrite: false,
+    uniforms: Object.assign({ uSmokeLit: FX.smokeLit }, WU), transparent: true, depthWrite: false,
     vertexShader: `${GLSL_WORLD}
-      attribute vec4 aP; attribute vec2 aA; varying vec2 vQ; varying float vA; varying float vE;
+      attribute vec4 aP; attribute vec3 aA; varying vec2 vQ; varying float vA; varying float vE; varying float vK;
       void main(){
         vec4 c = viewMatrix * vec4(aP.xyz, 1.0);
         c.xy += position.xy * aP.w;
-        vQ = position.xy * 2.0; vA = aA.x; vE = aA.y;
+        vQ = position.xy * 2.0; vA = aA.x; vE = aA.y; vK = aA.z;
         gl_Position = projectionMatrix * c;
       }`,
     fragmentShader: `${GLSL_HASH}
-      varying vec2 vQ; varying float vA; varying float vE;
+      uniform vec3 uSmokeLit;
+      varying vec2 vQ; varying float vA; varying float vE; varying float vK;
       void main(){
         float r = length(vQ);
         float n = vnoise(vQ * 2.2 + vE * 7.0);
         float a = (1.0 - smoothstep(0.35, 1.0, r + 0.25 * n)) * vA;
         if (a < 0.004) discard;
-        gl_FragColor = vec4(vec3(0.34, 0.34, 0.36) * (0.7 + 0.3 * n), a);
+        gl_FragColor = vec4(mix(vec3(0.34, 0.34, 0.36), vec3(0.3, 0.235, 0.16), vK) * uSmokeLit * (0.7 + 0.3 * n), a);
       }`,
   }));
   FX.smoke.frustumCulled = false;
   FX.smoke.userData.noShadow = true;
+  FX.smoke.renderOrder = 4;
   scene.add(FX.smoke);
+}
+function emitSmoke(x, y, z, vx, vy, vz, life, kind, op) {
+  const S = FX.smokeS, i = S.n; S.n = (S.n + 1) % SMOKE_N;
+  S.p[i * 3] = x; S.p[i * 3 + 1] = y; S.p[i * 3 + 2] = z; S.v[i * 3] = vx; S.v[i * 3 + 1] = vy; S.v[i * 3 + 2] = vz;
+  S.age[i] = 0; S.life[i] = life; S.kind[i] = kind; S.op[i] = op;
 }
 function updateSmoke(dt) {
   const S = FX.smokeS, d = DRIVE;
-  const rate = d.v < 18 ? 46 * sstep(0.55, 0.95, d.slip) : 0;
-  S.acc += rate * dt;
-  carRoot.updateMatrixWorld(true);
-  while (S.acc >= 1) {
-    S.acc -= 1;
-    const i = S.n; S.n = (S.n + 1) % SMOKE_N;
-    const side = rand() < 0.5 ? -1 : 1;
-    S.p[i * 3] = AX[1].x + (rand() - 0.5) * 0.4; S.p[i * 3 + 1] = 0.12; S.p[i * 3 + 2] = side * (AX[1].track - 0.002 + 0.1 * rand());
-    S.v[i * 3] = -d.v * (0.6 + 0.3 * rand()) - 2; S.v[i * 3 + 1] = 0.6 + 0.8 * rand(); S.v[i * 3 + 2] = side * (0.6 + rand());
-    S.age[i] = 0; S.life[i] = 1.4 + 1.4 * rand();
+  if (FREE.on) {
+    // every tyre that slides smokes on the road; off it the wheels throw up dust
+    FREE.wheels.forEach((q, i) => {
+      const ax = AX[i < 2 ? 0 : 1], side = i & 1 ? 1 : -1, hard = q.surf < 2, vw = Math.abs((i < 2 ? FREE.wf : FREE.wr) * ax.R), sp = Math.max(d.v, vw);
+      const rate = q.F <= 0 ? 0 : hard ? 80 * sstep(0.1, 0.55, q.slip) : q.surf === 6 ? 0 : (10 + 50 * q.slip) * sstep(3, 28, sp) * (q.surf === 2 ? 0.45 : 1);
+      S.acc[i] += rate * dt;
+      while (S.acc[i] >= 1) {
+        S.acc[i] -= 1;
+        const x = ax.x + (rand() - 0.5) * 0.4, z = side * (ax.track + 0.1 * rand());
+        // it leaves the tyre nearly at rest on the ground, a little of it dragged along and thrown outwards
+        const k = 0.72 + 0.2 * rand();
+        emitSmoke(x, 0.12, z, (-d.gvx + d.gw * z) * k, 0.5 + 0.9 * rand(), (-d.gvz - d.gw * x) * k + side * (0.4 + rand()), hard ? 1.5 + 1.5 * rand() : 1.1 + 1.3 * rand(), hard ? 0 : 1, hard ? 0.42 : 0.3);
+      }
+    });
+  } else {
+    S.acc[4] += (d.v < 18 ? 46 * sstep(0.55, 0.95, d.slip) : 0) * dt;
+    while (S.acc[4] >= 1) {
+      S.acc[4] -= 1;
+      const side = rand() < 0.5 ? -1 : 1;
+      emitSmoke(AX[1].x + (rand() - 0.5) * 0.4, 0.12, side * (AX[1].track - 0.002 + 0.1 * rand()), -d.v * (0.6 + 0.3 * rand()) - 2, 0.6 + 0.8 * rand(), side * (0.6 + rand()), 1.4 + 1.4 * rand(), 0, 0.42);
+    }
   }
   const A = FX.smoke.geometry.attributes.aP.array, B = FX.smoke.geometry.attributes.aA.array;
   let live = 0;
@@ -185,15 +204,18 @@ function updateSmoke(dt) {
   for (let i = 0; i < SMOKE_N; i++) {
     S.age[i] += dt;
     const f = S.age[i] / S.life[i];
-    if (f >= 1) { A[i * 4 + 3] = 0; B[i * 2] = 0; continue; }
+    if (f >= 1) { A[i * 4 + 3] = 0; B[i * 3] = 0; continue; }
     live++;
-    // carried back with the air, spreading and rising as it cools
-    S.v[i * 3] += (-d.v - S.v[i * 3]) * drag; S.v[i * 3 + 1] *= 1 - drag * 0.5; S.v[i * 3 + 2] *= 1 - drag;
+    // the air stands still over the ground: seen from the car it streams back, and swings round as the car turns
+    const px = S.p[i * 3], pz = S.p[i * 3 + 2];
+    S.v[i * 3] += (-d.gvx + d.gw * pz - S.v[i * 3]) * drag; S.v[i * 3 + 1] *= 1 - drag * 0.5; S.v[i * 3 + 2] += (-d.gvz - d.gw * px - S.v[i * 3 + 2]) * drag;
     for (let k = 0; k < 3; k++) S.p[i * 3 + k] += S.v[i * 3 + k] * dt;
     A[i * 4] = S.p[i * 3]; A[i * 4 + 1] = S.p[i * 3 + 1]; A[i * 4 + 2] = S.p[i * 3 + 2];
-    A[i * 4 + 3] = 0.5 + 2.6 * Math.sqrt(f);
-    B[i * 2] = 0.42 * Math.sin(Math.PI * Math.min(1, f * 4)) * (1 - f) * (0.4 + 0.6 * WORLD.mix); B[i * 2 + 1] = i * 0.37;
+    A[i * 4 + 3] = 0.5 + (S.kind[i] ? 3.4 : 2.6) * Math.sqrt(f);
+    B[i * 3] = S.op[i] * Math.sin(Math.PI * Math.min(1, f * 4)) * (1 - f) * (0.4 + 0.6 * WORLD.mix); B[i * 3 + 1] = i * 0.37; B[i * 3 + 2] = S.kind[i];
   }
+  // lit by the floodlights at night, by the sun and sky out on the land
+  if (WORLD.kind === 'land' && LAND.built) FX.smokeLit.value.copy(LU.uSunCol.value).multiplyScalar(0.3).add(LU.uSkyCol.value).multiplyScalar(1.6); else FX.smokeLit.value.setRGB(1, 1, 1);
   FX.smoke.visible = live > 0;
   FX.smoke.geometry.attributes.aP.needsUpdate = true; FX.smoke.geometry.attributes.aA.needsUpdate = true;
   return live > 0;
@@ -305,11 +327,19 @@ function updateFX(dt, t, snap = false) {
 }
 
 /* ---------- cockpit camera: rides the body, the head leans with the loads ---------- */
-const CAMRIG = { on: false, p: new V3(), q: new THREE.Quaternion(), m: new THREE.Matrix4(), off: new V3(), hq: new THREE.Quaternion(), tq: new THREE.Quaternion(), e: new THREE.Euler(), headX: 0, headZ: 0 };
+const CAMRIG = { on: false, p: new V3(), q: new THREE.Quaternion(), m: new THREE.Matrix4(), off: new V3(), hq: new THREE.Quaternion(), tq: new THREE.Quaternion(), e: new THREE.Euler(), headX: 0, headZ: 0,
+  fov: 30, ap: new V3(5.6, 1.45, 4.9), aq: new THREE.Quaternion() };
 function cameraRigApply() {
   const R = CAMRIG, d = DRIVE;
-  R.p.copy(camera.position); R.q.copy(camera.quaternion);
-  if (state.view === 'driver' && !camAnim) {
+  R.p.copy(camera.position); R.q.copy(camera.quaternion); R.fov = camera.fov;
+  if (state.view === 'chase' && !camAnim) {
+    // behind the car (blk_free.js); on the way there the picture eases over from where the camera was
+    const C = CHASE, k = ease(C.blend);
+    camera.position.copy(C.pos).add(d.shake); camera.quaternion.copy(C.q);
+    let fov = C.fov;
+    if (k > 0) { camera.position.lerp(C.fp, k); camera.quaternion.slerp(C.fq, k); fov = lerp(fov, C.ffov, k); }
+    if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  } else if (state.view === 'driver' && !camAnim) {
     // head: thrown forward under braking, outward in corners, buzzing with the road
     R.headX += (-d.lonG * 0.012 - R.headX) * 0.25; R.headZ += (-d.latG * 0.014 - R.headZ) * 0.25;
     car.updateMatrixWorld(true);
@@ -320,10 +350,12 @@ function cameraRigApply() {
     R.e.set(-d.latG * 0.012, 0, -d.lonG * 0.006);
     camera.quaternion.premultiply(R.hq).multiply(R.tq.setFromEuler(R.e));
   } else camera.position.add(d.shake);
+  R.ap.copy(camera.position); R.aq.copy(camera.quaternion);
   R.on = true;
 }
 function cameraRigRestore() {
   if (!CAMRIG.on) return;
   camera.position.copy(CAMRIG.p); camera.quaternion.copy(CAMRIG.q);
+  if (camera.fov !== CAMRIG.fov) { camera.fov = CAMRIG.fov; camera.updateProjectionMatrix(); }
   CAMRIG.on = false;
 }

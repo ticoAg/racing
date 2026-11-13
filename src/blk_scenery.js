@@ -147,7 +147,7 @@ function buildBarriers() {
       base = b;
     }
   };
-  const steel = [0.34, 0.35, 0.36], dark = [0.2, 0.205, 0.21], conc = [0.36, 0.355, 0.34];
+  const steel = [0.2, 0.205, 0.21], dark = [0.12, 0.125, 0.13], conc = [0.27, 0.265, 0.25];
   for (const w of LG.walls) {
     if (w.kind === 1) {
       strip(w, [[0.0, 0.4, dark], [0.07, 0.47, steel], [0.02, 0.56, dark], [0.07, 0.65, steel], [0.0, 0.72, steel]], 2, () => [0, 0]);
@@ -172,7 +172,7 @@ function buildBarriers() {
       else alb *= 0.85 + 0.3 * vnoise(vLP.xz * 0.7);
       outC = landLit(alb, N, vLP, vWP, 0.7);
       vec3 V = normalize(uToLand * (cameraPosition - vWP));
-      outC += uSunCol * pow(max(dot(reflect(-V, N), uSunDir), 0.0), 24.0) * 0.12 * step(vUv2.x, 0.5) * step(0.3, vCol.r);`,
+      outC += uSunCol * pow(max(dot(reflect(-V, N), uSunDir), 0.0), 24.0) * 0.12 * step(vUv2.x, 0.5) * step(0.18, vCol.r);`,
   });
   mat.vertexColors = true;
   const mesh = new THREE.Mesh(g, mat);
@@ -227,8 +227,10 @@ function buildProps() {
   // a box in road coordinates: from s0 to s1 along, n0 to n1 across, y0 to y1 above the road there
   const box = (s0, s1, n0, n1, y0, y1, c, grad) => {
     const P = lgRoadPose((s0 + s1) / 2, (n0 + n1) / 2, _sp1), g = tint(new THREE.BoxGeometry(Math.abs(s1 - s0), y1 - y0, Math.abs(n1 - n0)), c[0], c[1], c[2], grad);
-    m4.compose(v.set(P.x, R.h[P.i] + (y0 + y1) / 2, P.z), q.setFromEuler(e.set(0, -P.th, 0)), one);
-    parts.push(g.applyMatrix4(m4));
+    // (footings reach half a metre into the ground)
+    const lo = y0 === 0 ? -0.5 : y0, g2 = lo === y0 ? g : tint(new THREE.BoxGeometry(Math.abs(s1 - s0), y1 - lo, Math.abs(n1 - n0)), c[0], c[1], c[2], grad);
+    m4.compose(v.set(P.x, R.h[P.i] + (lo + y1) / 2, P.z), q.setFromEuler(e.set(0, -P.th, 0)), one);
+    parts.push(g2.applyMatrix4(m4));
   };
   const span = (s0, s1, n, r, h) => { for (let s = s0; s <= s1; s += r * 1.4) { const P = lgRoadPose(s, n, _sp1); casters.push([P.x, P.z, r, h]); solid.push([P.x, P.z, r * 0.9]); } };
   const HW = LG.HW;

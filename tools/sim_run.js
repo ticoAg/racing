@@ -101,3 +101,21 @@ if (wantAll) {
   console.table(rows);
 }
 if (laps.length) console.table(laps);
+// what must hold: nothing moves at rest, each model still does what its figures say, a swerve settles, traction
+// control keeps a full-throttle exit in hand, and the built-in driver laps the map on the road without touching anything
+const SPECS = { H9: [2.7, 397], G8: [3.6, 335], E4: [1.9, 380], R10: [2.2, 325] };
+let failed = 0;
+const must = (ok, what) => { if (!ok) { failed++; console.log('FAIL ' + what); } };
+for (const r of rows) if (wantAll) {
+  const S = SPECS[r.car];
+  must(r.rest === 'ok', r.car + ' at rest: ' + r.rest);
+  must(Math.abs(r['0-100'] - S[0]) <= 0.3, r.car + ' 0-100 km/h in ' + r['0-100'] + ' s, expected ' + S[0]);
+  must(Math.abs(r.vmax - S[1]) <= 8, r.car + ' reaches ' + r.vmax + ' km/h, expected ' + S[1]);
+  must(r.settles === 'yes', r.car + ' after a swerve: ' + r.settles);
+  must(r['exit°'] < 15, r.car + ' slides ' + r['exit°'] + '° on a full-throttle exit with traction control');
+  must(r['hb turn°'] > 60, r.car + ' turns only ' + r['hb turn°'] + '° on the handbrake');
+  must(r.rev < -10 && r.rev > -70, r.car + ' reverse: ' + r.rev + ' km/h');
+}
+for (const l of laps) must(typeof l.lap === 'number' && l['off road s'] <= 1 && l.hits === 0, l.car + ' lap: ' + JSON.stringify(l));
+console.log(failed ? failed + ' failed' : 'all checks passed');
+if (failed) process.exitCode = 1;

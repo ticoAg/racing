@@ -20,7 +20,7 @@ const LG = {
   TRENCH: 0.35,           // how far the land lies under the road's mesh
   NEAR_CELL: 8, NEAR_N: 512, NEAR_R: 88,
   ready: false, H: null, biome: null, near: null, D16: null,
-  road: null, walls: [], kerbs: [], trees: null, rocks: null, obst: null, sites: {},
+  road: null, walls: [], kerbs: [], trees: null, rocks: null, obst: null,
   spawn: { x: 0, z: 0, th: 0 },
 };
 
@@ -302,6 +302,12 @@ function lgNatural(x, z, D, G) {
   }
   return h;
 }
+// 1 along the stadium on the main straight, easing to 0 over 60 m at its ends
+const LG_STADIUM = [-330, 610];
+function lgStadium(i) {
+  const R = LG.road, s = i > R.n / 2 ? i - R.n : i;
+  return lsmooth(LG_STADIUM[0] - 60, LG_STADIUM[0], s) * (1 - lsmooth(LG_STADIUM[1], LG_STADIUM[1] + 60, s));
+}
 function lgBuildLand(onStep) {
   const R = LG.road, N = LG.N, C = LG.CELL, HALF = LG.HALF;
   // coarse fields (16 m): distance to the road, and the guide surface through the road's elevations
@@ -334,7 +340,9 @@ function lgBuildLand(onStep) {
         const an = Math.abs(o.n);
         const T = R.h[o.i] + (R.h[o.i + 1] - R.h[o.i]) * o.t - (R.bank[o.i] + (R.bank[o.i + 1] - R.bank[o.i]) * o.t) * Math.max(-lim, Math.min(lim, o.n)) - LG.TRENCH;
         const blend = Math.max(14, Math.min(60, 12 + 2.2 * Math.abs(h - T)));
-        const w = an <= FLAT ? 1 : 1 - lsmooth(0, 1, (an - FLAT) / blend);
+        // (level ground for the stadium's buildings beside the main straight)
+        const flat = FLAT + 26 * lgStadium(o.i);
+        const w = an <= flat ? 1 : 1 - lsmooth(0, 1, (an - flat) / blend);
         h += (T - h) * w;
       }
       H[j * N + i] = h;
@@ -400,8 +408,7 @@ function lgBuildWalls() {
   const R = LG.road, N = R.n, W = R.W;
   const mark = (A, i0, i1, v) => { for (let i = i0; i <= i1; i++) if (A[W(i)] < v) A[W(i)] = v; };
   // the main straight runs through the stadium: walls on both sides
-  LG.sites.stadium = [-330, 610];
-  mark(R.wallL, -330, 610, 2); mark(R.wallR, -330, 610, 2);
+  mark(R.wallL, LG_STADIUM[0], LG_STADIUM[1], 2); mark(R.wallR, LG_STADIUM[0], LG_STADIUM[1], 2);
   // guardrails round the outside of every bend, where the ground falls away beside the road, and along the lake
   for (const c of R.corners) if (c.peak > 1 / 420) mark(c.sgn > 0 ? R.wallL : R.wallR, c.i0 - 26, c.i1 + 26, 1);
   const p = {};
@@ -463,6 +470,11 @@ function lgWood(x, z, h, slope, D) {
   // clear of the road, thinner towards the tree line
   return w * lsmooth(LG.HW + 9, LG.HW + 30, D) * (1 - lsmooth(170, 235, h));
 }
+// (nothing grows where the stadium stands)
+function lgInStadium(x, z) {
+  const o = {};
+  return lgRoadAt(x, z, o) && Math.abs(o.n) < 44 && lgStadium(o.i) > 0.01;
+}
 // trees: x, z, ground height, size, kind (0 conifer, 1 broadleaf, 2 poplar), turn, shade of green
 function lgBuildTrees() {
   const rnd = lgRand(4711), T = { n: 0, x: [], z: [], y: [], s: [], kind: [], rot: [], tint: [] }, N = LG.N, H = LG.H;
@@ -479,7 +491,7 @@ function lgBuildTrees() {
     const w = lgWood(x, z, h, slope, D);
     // a few lone trees stand in the open country
     const lone = D > LG.HW + 16 && h > LG.WATER + 1.5 && h < 150 && slope < 0.45 ? 0.012 : 0;
-    if (u > w * 0.8 + lone) continue;
+    if (u > w * 0.8 + lone || lgInStadium(x, z)) continue;
     const high = lsmooth(60, 130, h + 25 * gnoise(x / 200, z / 200));
     add(x, z, v < 0.12 + 0.82 * high ? 0 : 1, 0.75 + 0.6 * rnd());
   }

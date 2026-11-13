@@ -18,7 +18,7 @@ const FREE = {
   zb: 0, zbV: 0, pitch: 0, pitchV: 0, roll: 0, rollV: 0,   // sprung body: height, nose-up pitch, right-side-down roll
   delta: 0, steer: 0, thr: 0, brk: 0, hb: 0, rev: false, revT: 0,
   absF: 1, absR: 1, tc: 1, upT: 0, split: 0.4,
-  air: 0, airT: 0, landV: 0, ax: 0, ay: 0, hit: 0, hitSide: 0, scrape: 0, wet: 0, wetT: 0,
+  air: 0, airT: 0, landV: 0, ax: 0, ay: 0, hit: 0, hitSide: 0, scrape: 0, wet: 0, wetT: 0, sq: 0, loose: 0, rough: 0, esc: 0,
   s: 0, n: 0, onRoad: false, roadI: -1, surf: 0, offT: 0,
   wheels: [], assist: { tcs: true, abs: true, steer: true },
   // what the picture needs: scene origin on the map, the plane the wheels stand on, the body on its springs
@@ -87,6 +87,7 @@ function freePlace(x, z, th) {
   F.zb = (g[0] + g[1]) / 2 - D.a * F.pitch;
   F.zb = (F.zb + (g[2] + g[3]) / 2 + D.b * F.pitch) / 2;
   if (DRIVE.gear < 1) DRIVE.gear = 1;
+  if (lgRoadAt(F.x, F.z, _dr, -1)) { F.roadI = _dr.i; F.s = _dr.s; F.n = _dr.n; F.onRoad = Math.abs(_dr.n) < LG.HW + 0.6; } else { F.roadI = -1; F.onRoad = false; F.n = 99; }
   freeView();
 }
 
@@ -364,6 +365,13 @@ function dynSteerMap(x, v) {
   const ax = Math.abs(x);
   return Math.sign(x) * Math.min(DYN.DMAX, dynSteerLock(v) * ax + DYN.ap * 0.95 * ax * ax * ax * ax);
 }
+// the input that turns the front wheels to an angle
+function dynSteerInv(delta, v) {
+  const lock = dynSteerLock(v), d = Math.min(Math.abs(delta), DYN.DMAX);
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 14; i++) { const x = (lo + hi) / 2; if (lock * x + DYN.ap * 0.95 * x * x * x * x < d) lo = x; else hi = x; }
+  return Math.sign(delta) * (lo + hi) / 2;
+}
 // raw: steer -1..1 (right positive), thr, brk, hb 0..1; digital: the keys of a keyboard, which need ramping
 function dynControls(dt, raw) {
   const F = FREE, d = DRIVE, V = Math.hypot(F.u, F.w);
@@ -406,11 +414,11 @@ function autoPlan() {
   const v = AUTO.v = new Float32Array(N), dep = planDep(), top = Math.min(VCAP, 300 / 3.6);
   for (let i = 0; i < N; i++) {
     let k = 0; for (let j = -3; j <= 3; j++) k = Math.max(k, Math.abs(R.k[R.W(i + j)]));
-    v[i] = Math.min(top, cornerSpeed(k * 1.08, dep) * 0.93);
+    v[i] = Math.min(top, cornerSpeed(k * 1.08, dep) * 0.9);
   }
   for (let pass = 0; pass < 2; pass++) for (let i = N - 1; i >= 0; i--) {
     const j = (i + 1) % N, vn = v[j], use = Math.min(0.95, vn * vn * Math.abs(R.k[j]) / latCap(vn, dep));
-    const a = brakeCap(vn, dep) * 0.8 * Math.sqrt(Math.max(0.15, 1 - use * use));
+    const a = brakeCap(vn, dep) * 0.72 * Math.sqrt(Math.max(0.15, 1 - use * use));
     v[i] = Math.min(v[i], Math.sqrt(vn * vn + 2 * a * R.ds));
   }
 }
@@ -427,13 +435,16 @@ function autoDrive(raw) {
   // (the direction the car is travelling in, not the one it points in: a slide is not chased with the wheel)
   let he = here.th - (F.th + (V > 5 ? Math.atan2(F.w, F.u) * 0.7 : 0)); he -= Math.round(he / (2 * Math.PI)) * 2 * Math.PI;
   const Vc = Math.max(V, 6), kap = kf + clamp((2.5 * Vc * he - 1.8 * e) / (Vc * Vc), -0.12, 0.12);
-  const lock = dynSteerLock(V);
-  raw.steer = clamp(lock >= DYN.DMAX ? WHEELBASE * kap / DYN.DMAX : V * V * kap / (0.9 * latCap(V, planDep())), -1, 1);
+  // the lock that curve takes: its geometry, and near the limit the slip the front tyres need over the rear ones;
+  // then the input that gives that lock
+  const use = Math.min(1.1, V * V * Math.abs(kap) / (0.88 * latCap(V, planDep())));
+  raw.steer = dynSteerInv(WHEELBASE * kap + Math.sign(kap) * DYN.ap * 0.55 * Math.pow(use, 6), V);
   const iNow = R.W(Math.round(F.s / R.ds)), iAhead = R.W(Math.round((F.s + Math.max(4, V * 0.25)) / R.ds));
   const vt = AUTO.v[iAhead], vn = AUTO.v[iNow];
   if (V > vn + 0.4 || V > vt + 1.5) { raw.thr = 0; raw.brk = clamp((V - Math.min(vn, vt)) * 0.35 + 0.15, 0, 1); }
   else { raw.brk = 0; raw.thr = clamp((vt - V) * 0.45, 0, 1); }
-  // ease off when the car is sliding
+  // the tyres cannot both corner and drive at full: feed the power in as the bend opens; ease off in a slide
+  raw.thr *= clamp(1.45 - 1.25 * Math.max(use, Math.abs(F.ay) / (0.88 * latCap(V, planDep()))), 0.15, 1);
   const beta = Math.abs(Math.atan2(F.w, Math.max(3, F.u)));
   if (beta > 0.1) raw.thr *= 0.4;
   return raw;
@@ -478,6 +489,10 @@ function freeAdvance(dt, raw) {
   d.kerbL = W[0].kerb || W[2].kerb ? 1 : 0; d.kerbR = W[1].kerb || W[3].kerb ? 1 : 0;
   d.s = F.s; d.n = F.n;
   F.surf = W[2].surf;
+  // tyres crying on the road, wheels on loose ground, how rough it is
+  let sq = 0, loose = 0, rough = 0;
+  for (let i = 0; i < 4; i++) { const q = W[i]; if (q.F > 0) { if (q.surf < 2) sq = Math.max(sq, q.slip); else if (q.surf < 6) loose += 0.25; rough += LG_SURF[q.surf].rough / 0.03 / 4; } }
+  F.sq += (sq - F.sq) * Math.min(1, dt * 14); F.loose += (loose - F.loose) * Math.min(1, dt * 8); F.rough = rough;
   F.odo += V * dt; if (V > F.top) F.top = V;
   freeView();
   freeScore(dt);
