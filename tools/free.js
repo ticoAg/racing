@@ -60,9 +60,10 @@ const [VW, VH] = shots ? [960, 540] : [480, 300];
   check('brakes to a stop, then backs up', s.u < -2 && s.gear === -1, JSON.stringify(s));
   await page.keyboard.up('KeyS');
   await page.keyboard.down('KeyW');
-  await until(() => window.__ui.FREE.u > 8);
+  // (the car stands on the verge here: it gathers speed unevenly over the grass, so wait well past what is checked)
+  await until(() => window.__ui.FREE.u > 11);
   s = await st();
-  check('forward again', s.gear >= 1 && s.u > 8);
+  check('forward again', s.gear >= 1 && s.u > 8, JSON.stringify(s));
   if (!quick) {
     // handbrake turn
     const th0 = s.th;
