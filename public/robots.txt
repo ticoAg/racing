@@ -5,6 +5,19 @@ User-agent: *
 Content-Signal: search=yes, ai-input=yes, ai-train=yes
 Allow: /
 
+# Search engines, by name: a crawler that finds a group of its own elsewhere in this file reads that one and not
+# the group for everyone (Cloudflare's managed robots.txt, where the zone has it on, puts such groups in front)
+User-agent: Googlebot
+User-agent: Bingbot
+User-agent: Baiduspider
+User-agent: Sogou web spider
+User-agent: 360Spider
+User-agent: YisouSpider
+User-agent: PetalBot
+User-agent: YandexBot
+User-agent: DuckDuckBot
+Allow: /
+
 # AI search and assistants (answers that cite the page)
 User-agent: OAI-SearchBot
 User-agent: ChatGPT-User
@@ -14,6 +27,7 @@ User-agent: PerplexityBot
 User-agent: Perplexity-User
 User-agent: DuckAssistBot
 User-agent: MistralAI-User
+User-agent: KimiBot
 User-agent: Applebot
 Allow: /
 

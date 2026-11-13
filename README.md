@@ -121,7 +121,10 @@ The Cloudflare Pages project `racing` is connected to this repository and builds
 
 Pushes to `main` go to production at https://racing.ticoag.fun (also https://racing-ddu.pages.dev); other branches get preview URLs. `functions/` is picked up by the same build; it runs only on the pages' own addresses (`public/_routes.json`), and the static files are served as before if it fails.
 
-Two settings of the `ticoag.fun` zone decide whether AI crawlers get in at all, whatever `robots.txt` says: **Block AI bots** (Security → Settings → Bot traffic) refuses them at the edge, and the **managed robots.txt** puts Cloudflare's own `Disallow` rules in front of the site's file. Both must be off for the zone if the pages are to be read by AI search.
+Two settings of the `ticoag.fun` zone act on crawlers before this site's own files do, for every hostname of the zone:
+
+- **Block AI bots** (Security → Settings → Bot traffic) refuses AI training crawlers at the edge with a 403 (GPTBot, ClaudeBot, CCBot, Bytespider, Amazonbot). AI search and assistants (OAI-SearchBot, ChatGPT-User, Claude-SearchBot, PerplexityBot) are let through.
+- The **managed robots.txt** puts Cloudflare's own groups in front of `public/robots.txt`: `Disallow: /` for the training crawlers and also for Baiduspider, PetalBot and KimiBot, and `ai-train=no`. `public/robots.txt` names those crawlers again with `Allow: /`, which wins where a crawler merges its groups as RFC 9309 says; turning the managed file off is the sure way.
 
 ## Tools
 
