@@ -459,10 +459,12 @@ async function createSound(ctx, spec = SPEC) {
     T(rumble.gain, inside * on * (0.5 + 0.6 * load), 0.06);
     // tyres
     const v = d.v, kmh = v * 3.6, va = Math.max(v, air);
-    T(rollLp.frequency, 160 + 8 * kmh, 0.1);
-    T(rollG.gain, (0.05 * sstep(1, 40, kmh) + 0.07 * clamp(kmh / 300, 0, 1.4)) * (inside ? 0.8 : 1), 0.1);
+    // off the road the tyres rumble over grass and stones
+    const loose = FREE.on ? FREE.loose * sstep(1, 22, v) : 0;
+    T(rollLp.frequency, (160 + 8 * kmh) * (1 - 0.45 * loose), 0.1);
+    T(rollG.gain, (0.05 * sstep(1, 40, kmh) + 0.07 * clamp(kmh / 300, 0, 1.4)) * (inside ? 0.8 : 1) * (1 + 3.2 * loose), 0.1);
     const lat = Math.abs(d.latG) * GRAV / Math.max(1, latCap(v, planDep()));
-    const slip = sstep(0.82, 1.0, lat) * 0.85 + sstep(0.8, 1, d.brake) * sstep(10, 30, v) * 0.45 + sstep(0.4, 1, d.slip) * 0.9;
+    const slip = FREE.on ? clamp(FREE.sq * 1.5, 0, 1.2) : sstep(0.82, 1.0, lat) * 0.85 + sstep(0.8, 1, d.brake) * sstep(10, 30, v) * 0.45 + sstep(0.4, 1, d.slip) * 0.9;
     T(sq.gain, 0.08 * slip, 0.06);
     T(sqBp.frequency, 980 + 260 * slip, 0.1);
     const kerb = Math.max(d.kerbL, d.kerbR);
@@ -477,20 +479,21 @@ async function createSound(ctx, spec = SPEC) {
     T(buffG.gain, 0.09 * d.airbrake * sstep(20, 60, v), 0.08);
     T(buffLG.gain, 0.05 * d.airbrake * sstep(20, 60, v), 0.08);
     T(fanG.gain, aeroOn && d.engine === 0 && d.start <= 0 ? 0.03 : 0, 0.5);
-    T(brkG.gain, 0.035 * d.brake * sstep(5, 40, v), 0.05);
+    T(brkG.gain, 0.035 * d.brake * sstep(5, 40, v) + (FREE.on ? 0.14 * FREE.scrape : 0), 0.05);
     T(absG.gain, d.abs ? 0.02 : 0, 0.05);
     T(whine.frequency, 40 + v * 42, 0.05);
     T(whineG.gain, on * (motor ? 0 : 0.012) * sstep(2, 25, v) * (0.4 + thr) * (inside ? 1.6 : 1), 0.08);
     // the circuit: wall echoes (delay = there and back at the speed of sound), less room reverb outdoors
-    const wm = WORLD.mix;
+    // (the open country has no walls to throw the sound back, and no masts to pass)
+    const wm = WORLD.mix, wc = WORLD.kind === 'land' ? 0 : wm;
     for (const W of walls) {
       const dist = Math.max(2, TRACK.WALL - W.side * d.n);
       T(W.dl.delayTime, Math.min(0.38, 2 * dist / 343), 0.05);
-      T(W.g.gain, wm * on * 0.3 * clamp(7 / dist, 0.2, 1.2) * (inside ? 0.5 : 1), 0.1);
+      T(W.g.gain, wc * on * 0.3 * clamp(7 / dist, 0.2, 1.2) * (inside ? 0.5 : 1), 0.1);
     }
     T(verbSend.gain, lerp(0.08, 0.025, wm), 0.3);
     // masts and gantries passing the camera
-    if (wm > 0.5 && v > 8 && cam) {
+    if (wc > 0.5 && v > 8 && cam) {
       const sCam = d.s + cam.pos.x;
       if (pass.s !== null && sCam > pass.s) {
         const D = TRACK.LAMP_D, j0 = Math.floor(pass.s / D), j1 = Math.floor(sCam / D);
@@ -550,7 +553,8 @@ function setSound(on) {
 const _cam = { pos: new V3(), fwd: new V3(), up: new V3(), inside: false };
 function audioFrame(dt) {
   if (SND.on && SND.eng && SND.ctx && SND.ctx.state === 'running') {
-    _cam.pos.copy(camera.position); camera.getWorldDirection(_cam.fwd); _cam.up.copy(camera.up).applyQuaternion(camera.quaternion);
+    // (the camera as the picture was last taken: the one following the car, or riding in it)
+    _cam.pos.copy(CAMRIG.ap); _cam.fwd.set(0, 0, -1).applyQuaternion(CAMRIG.aq); _cam.up.set(0, 1, 0).applyQuaternion(CAMRIG.aq);
     _cam.inside = state.view === 'driver' || (state.view === 'cabin' && camera.position.distanceTo(_cockpitC) < 1.2);
     SND.eng.update(SND.ctx.currentTime, dt, DRIVE, airspeed(), AERO.on, _cam);
   }

@@ -7,7 +7,7 @@
    whose attitude (pitch, roll, squat, ride height, rake) is the model's own;
    sparks; telemetry
    ========================================================================= */
-const POSES = { park: { name: '静止' }, cruise: { name: '巡航' }, corner: { name: '过弯' }, brake: { name: '制动' } };
+const POSES = { park: { name: '静止' }, cruise: { name: '巡航' }, corner: { name: '过弯' }, brake: { name: '制动' }, free: { name: '自由驾驶' } };
 const GRAV = 9.81, RHO = 1.225;
 const RPM_K = 60 / (2 * Math.PI);
 // set by useModelDrive
@@ -35,7 +35,7 @@ function gearFor(v) {
   for (let g = 1; g <= NGEAR; g++) if (v / CARP.Rr * RATIO[g] * RPM_K <= UPSHIFT) return g;
   return NGEAR;
 }
-const gearLabel = () => (DRIVE.engine > 0 ? (DRIVE.v < 0.5 && DRIVE.throttle < 0.05 ? 'N' : EV ? 'D' : String(DRIVE.gear)) : '–');
+const gearLabel = () => (DRIVE.engine > 0 ? (DRIVE.gear < 0 ? 'R' : DRIVE.v < 0.5 && DRIVE.throttle < 0.05 ? 'N' : EV ? 'D' : String(DRIVE.gear)) : '–');
 
 const DRIVE = {
   prog: 'park', t: 0, phase: '', phaseT: 0, simT: 0,
@@ -44,6 +44,8 @@ const DRIVE = {
   heat: 0, airbrake: 0, abHold: 0, lowDrag: 0, abs: 0,
   pitch: 0, pitchV: 0, roll: 0, rollV: 0, heave: 0, heaveV: 0, yaw: 0, steer: 0.17,
   latG: 0, lonG: 0, kerbL: 0, kerbR: 0, events: [], shake: new V3(), sparkBurst: 0,
+  gvx: 0, gvz: 0, gw: 0,   // how the ground moves under the car: its speed forward and to the right, its yaw rate
+  hurry: false,
 };
 const ev = (type, o) => DRIVE.events.push(Object.assign({ type, t: DRIVE.simT }, o));
 
@@ -125,21 +127,32 @@ function programChange() {
   if (d.engine === 0 && d.start <= 0) { d.start = PWR.start.time; ev('start'); }
 }
 
+// cranking, then the engine catches and flares; an electric car closes its contactors and is ready. True while it lasts
+function engineStarting(dt) {
+  const d = DRIVE;
+  if (d.start <= 0) return false;
+  d.start -= dt; d.simT += dt;
+  const e = PWR.start.time - d.start;
+  if (EV) { if (e < PWR.start.time * 0.6) d.engine = 0.5; else { if (d.engine < 1) ev('catch'); d.engine = 1; } d.rpm = 0; }
+  else if (e < 0.55) { d.engine = 0.5; d.rpm = 230 + 60 * Math.sin(e * 55); }
+  else { if (d.engine < 1) ev('catch'); d.engine = 1; d.rpm = IDLE + PWR.start.flare * Math.exp(-(e - 0.55) * 5.5) * sstep(0.55, 0.62, e); }
+  d.rpmT = d.rpm; d.a = 0; d.throttle = 0; d.brake = 1;
+  return true;
+}
 function driveProgram(dt) {
   const d = DRIVE;
+  // out in the open country the car is driven, not run through a program (blk_free.js)
+  if (FREE.on) { freeDrive(dt); return; }
   // (a car with parts off is put together before it starts)
-  if (d.prog !== state.pose && !XPL.any) programChange();
-  d.t += dt; d.phaseT += dt;
-  if (d.start > 0) {
-    // cranking, then the engine catches and flares; an electric car closes its contactors and is ready
-    d.start -= dt; d.simT += dt;
-    const e = PWR.start.time - d.start;
-    if (EV) { if (e < PWR.start.time * 0.6) d.engine = 0.5; else { if (d.engine < 1) ev('catch'); d.engine = 1; } d.rpm = 0; }
-    else if (e < 0.55) { d.engine = 0.5; d.rpm = 230 + 60 * Math.sin(e * 55); }
-    else { if (d.engine < 1) ev('catch'); d.engine = 1; d.rpm = IDLE + PWR.start.flare * Math.exp(-(e - 0.55) * 5.5) * sstep(0.55, 0.62, e); }
-    d.rpmT = d.rpm; d.a = 0; d.throttle = 0; d.brake = 1;
-    return;
+  if (d.prog !== state.pose && !XPL.any) {
+    const want = state.pose, kind = want === 'free' ? 'land' : 'track';
+    // the other world is still out: the car is parked and switched off first, and the studio comes back in between
+    if (want !== 'park' && WORLD.mix > 0.02 && WORLD.kind !== kind) { if (d.prog !== 'park') { d.prog = 'park'; d.t = 0; d.phase = ''; } d.hurry = true; }
+    else if (want === 'free') { if (landBuildStep()) { WORLD.kind = 'land'; d.hurry = false; freeEnter(); return; } }
+    else { if (want !== 'park') { WORLD.kind = 'track'; d.hurry = false; } programChange(); }
   }
+  d.t += dt; d.phaseT += dt;
+  if (engineStarting(dt)) return;
   let thr = 0, brk = 0;
   if (d.prog === 'park') {
     if (d.v > 0.05) brk = clamp(0.2 + d.v * 0.012, 0, 0.55); else { d.v = 0; brk = 0.4; }
@@ -165,7 +178,7 @@ function driveProgram(dt) {
   const n = Math.max(1, Math.ceil(dt * 240));
   for (let i = 0; i < n; i++) physStep(dt / n);
   // stopped in park: idle, then switch off so the studio can come back
-  if (d.prog === 'park' && d.v === 0 && d.engine >= 1) { d.idleT += dt; if (d.idleT > 2.4) { d.engine = 0; ev('stop'); d.gear = 1; } }
+  if (d.prog === 'park' && d.v === 0 && d.engine >= 1) { d.idleT += dt; if (d.idleT > (d.hurry ? 0.5 : 2.4)) { d.engine = 0; ev('stop'); d.gear = 1; } }
   else d.idleT = 0;
 }
 
@@ -264,31 +277,32 @@ const _piv = new V3(0, 0.45, 0), _tmp = new V3(), _sa = { f: 0, r: 0, drag: 0 };
 function updateDrive(dt, t, snap = false) {
   const d = DRIVE;
   if (snap) snapDrive(); else driveProgram(dt);
-  d.latG = d.v * d.v * d.k / GRAV;
-  d.lonG = d.a / GRAV;
+  const free = FREE.on, S = SUSP;
+  if (!free) { d.latG = d.v * d.v * d.k / GRAV; d.lonG = d.a / GRAV; d.gvx = d.v; d.gvz = 0; d.gw = d.v * d.k; }
   // brake discs heat up under load and cool with airflow
   if (!snap) d.heat = clamp(d.heat + dt * (d.brake * clamp(d.v / 60, 0, 1.4) * 0.95 - (0.06 + 0.12 * d.v / 64) * (1 - d.brake)), 0, 1.25);
-  // suspension: load transfer and aero compression drive pitch, roll and heave springs
-  const A = aeroForces(d.v, clamp(wingDeploy, 0, 1), d.airbrake, _sa);
-  const cF = A.f / CARP.KF, cR = A.r / CARP.KR;
-  const S = SUSP;
-  const pT = S.pitch * d.lonG + (cR - cF) / WHEELBASE, rT = -S.roll * d.latG;
-  const hT = -(cF * -AX[1].x + cR * AX[0].x) / WHEELBASE - S.heave * Math.abs(d.lonG);
-  if (snap) { d.pitch = pT; d.roll = rT; d.heave = hT; d.pitchV = d.rollV = d.heaveV = 0; }
-  else {
-    const n = Math.max(1, Math.ceil(dt / 0.01)), h = dt / n;
-    for (let i = 0; i < n; i++) {
-      d.pitchV += (S.wp * S.wp * (pT - d.pitch) - 2 * S.zp * S.wp * d.pitchV) * h; d.pitch += d.pitchV * h;
-      d.rollV += (S.wr * S.wr * (rT - d.roll) - 2 * S.zr * S.wr * d.rollV) * h; d.roll += d.rollV * h;
-      d.heaveV += (S.wh * S.wh * (hT - d.heave) - 2 * S.zh * S.wh * d.heaveV) * h; d.heave += d.heaveV * h;
-    }
-  }
-  const yawT = -S.yaw * d.latG;
   const inside = state.view === 'cabin' || state.view === 'driver';
-  // steering: geometry plus a little understeer, steering column ratio 13:1 in the cockpit
-  const steerT = d.v < 0.3 && d.prog === 'park' && WORLD.mix < 0.5 ? (inside || XPL.live ? 0 : 0.17) : -(WHEELBASE * d.k + S.understeer * d.latG) * 1.35;
-  const e = snap ? 1 : 1 - Math.exp(-dt * 5);
-  d.yaw += (yawT - d.yaw) * e; d.steer += (steerT - d.steer) * (snap ? 1 : 1 - Math.exp(-dt * 6));
+  if (!free) {
+    // suspension: load transfer and aero compression drive pitch, roll and heave springs
+    const A = aeroForces(d.v, clamp(wingDeploy, 0, 1), d.airbrake, _sa);
+    const cF = A.f / CARP.KF, cR = A.r / CARP.KR;
+    const pT = S.pitch * d.lonG + (cR - cF) / WHEELBASE, rT = -S.roll * d.latG;
+    const hT = -(cF * -AX[1].x + cR * AX[0].x) / WHEELBASE - S.heave * Math.abs(d.lonG);
+    if (snap) { d.pitch = pT; d.roll = rT; d.heave = hT; d.pitchV = d.rollV = d.heaveV = 0; }
+    else {
+      const n = Math.max(1, Math.ceil(dt / 0.01)), h = dt / n;
+      for (let i = 0; i < n; i++) {
+        d.pitchV += (S.wp * S.wp * (pT - d.pitch) - 2 * S.zp * S.wp * d.pitchV) * h; d.pitch += d.pitchV * h;
+        d.rollV += (S.wr * S.wr * (rT - d.roll) - 2 * S.zr * S.wr * d.rollV) * h; d.roll += d.rollV * h;
+        d.heaveV += (S.wh * S.wh * (hT - d.heave) - 2 * S.zh * S.wh * d.heaveV) * h; d.heave += d.heaveV * h;
+      }
+    }
+    const yawT = -S.yaw * d.latG;
+    // steering: geometry plus a little understeer, steering column ratio 13:1 in the cockpit
+    const steerT = d.v < 0.3 && d.prog === 'park' && WORLD.mix < 0.5 ? (inside || XPL.live ? 0 : 0.17) : WORLD.kind === 'land' ? 0 : -(WHEELBASE * d.k + S.understeer * d.latG) * 1.35;
+    const e = snap ? 1 : 1 - Math.exp(-dt * 5);
+    d.yaw += (yawT - d.yaw) * e; d.steer += (steerT - d.steer) * (snap ? 1 : 1 - Math.exp(-dt * 6));
+  } else { d.yaw = 0; d.pitchV = d.rollV = d.heaveV = 0; }
   // road texture, kerb ridges and ABS shudder
   const kmh = d.v * 3.6, vib = clamp(kmh / 80, 0, 1.8), abs = d.abs;
   const kf = d.v / 0.75, kerb = d.kerbL - d.kerbR;
@@ -300,12 +314,21 @@ function updateDrive(dt, t, snap = false) {
   car.rotation.set(roll, 0, pitch + STANCE.rake);
   car.position.copy(_piv).sub(_tmp.copy(_piv).applyEuler(car.rotation)).add(_tmp.set(0, lift - STANCE.drop, 0));
   carRoot.rotation.y = d.yaw;
-  const blurK = sstep(6, 60, kmh);
-  for (const w of WHEEL_OBJS) {
-    w.userData.spin.rotation.z -= Math.min(d.v / w.userData.R, Math.PI * 2 * 2.4) * dt;
+  // out on the land the wheels stand on the ground under each of them and the body rides over them; as the studio
+  // comes back the car is set level again
+  const onLand = WORLD.kind === 'land' && (free || WORLD.mix > 0) ? (free ? 1 : sstep(0, 0.6, WORLD.mix)) : 0, fv = FREE.view;
+  carRoot.rotation.x = Math.atan(fv.roll) * onLand; carRoot.rotation.z = Math.atan(fv.pitch) * onLand;
+  MODEL_PIVOTS.forEach((p, i) => { p.position.y = AX[i < 2 ? 0 : 1].yc + fv.e[i] * onLand; });
+  // the wheels turn at their own speed: spinning up under power, locked under the handbrake
+  const cap = Math.PI * 2 * 2.4;
+  let blurK = sstep(6, 60, kmh);
+  WHEEL_OBJS.forEach((w, i) => {
+    const om = free ? (i < 2 ? FREE.wf : FREE.wr) : d.v / w.userData.R;
+    w.userData.spin.rotation.z -= clamp(om, -cap, cap) * dt;
+    if (free) blurK = Math.max(i < 2 ? 0 : blurK, sstep(6, 60, Math.abs(om) * w.userData.R * 3.6));
     w.userData.blur.visible = blurK > 0.01;
-    w.userData.letters.material.opacity = 1 - 0.85 * blurK;
-  }
+  });
+  for (const w of WHEEL_OBJS) w.userData.letters.material.opacity = 1 - 0.85 * blurK;
   M.blur.opacity = 0.8 * blurK;
   for (const p of FRONT_PIVOTS) p.rotation.y = d.steer;
   if (M.discFace) {
@@ -315,7 +338,7 @@ function updateDrive(dt, t, snap = false) {
   }
   if (M.tail) M.tail.emissiveIntensity = (state.lights ? 2.2 : 0.25) + d.brake * 6;
   // camera shake: road, braking shudder, cornering load, buffeting at very high speed
-  const amp = 0.001 * sstep(5, 60, kmh) + 0.0011 * sstep(220, 400, kmh) + 0.003 * d.brake * sstep(15, 60, kmh) + 0.0011 * Math.min(2, Math.abs(d.latG)) + 0.0016 * (d.kerbL + d.kerbR);
+  const amp = 0.001 * sstep(5, 60, kmh) + 0.0011 * sstep(220, 400, kmh) + 0.003 * d.brake * sstep(15, 60, kmh) + 0.0011 * Math.min(2, Math.abs(d.latG)) + 0.0016 * (d.kerbL + d.kerbR) + (free ? 0.02 * FREE.hit + 0.0016 * FREE.rough * sstep(3, 30, kmh) : 0);
   d.shake.set(Math.sin(t * 41.3) * 0.6 + Math.sin(t * 23.1), Math.sin(t * 37.7 + 1.1) + Math.sin(t * 19.3) * 0.5, Math.sin(t * 31.1 + 2.3)).multiplyScalar(amp * 0.6);
   sparkSource(dt, snap);
   const moving = d.v > 0.01 || d.start > 0 || d.engine > 0 || Math.abs(d.pitchV) + Math.abs(d.rollV) + Math.abs(d.heaveV) > 1e-4 || d.heat > 0.01 || d.airbrake > 0.01;
@@ -326,6 +349,9 @@ function updateDrive(dt, t, snap = false) {
 // deterministic stills for screenshots
 function snapDrive() {
   const d = DRIVE;
+  if (state.pose === 'free') { freeSnap(); return; }
+  if (FREE.on) freeLeave(true);
+  WORLD.kind = 'track';
   d.prog = state.pose; d.start = 0; d.blip = 0; d.shiftCut = 0; d.cut = 0; d.cutT = 0; d.slip = 0; d.phase = 'go'; d.overrun = 0;
   const set = (o) => Object.assign(d, { a: 0, throttle: 0, brake: 0, heat: 0, airbrake: 0, lowDrag: 0, kerbL: 0, kerbR: 0 }, o);
   if (state.pose === 'park') { set({ v: 0, gear: 1, rpm: 0, engine: 0, k: 0 }); WORLD.mix = WORLD.target = 0; return; }
@@ -399,7 +425,7 @@ function stepSparks(dt, d, emit) {
     if (A[i] >= L[i]) continue;
     A[i] += dt;
     V[i * 3 + 1] -= GRAV * dt;
-    V[i * 3] += (-d.v - V[i * 3]) * drag; V[i * 3 + 2] *= 1 - drag;
+    V[i * 3] += (-d.gvx + d.gw * P[i * 3 + 2] - V[i * 3]) * drag; V[i * 3 + 2] += (-d.gvz - d.gw * P[i * 3] - V[i * 3 + 2]) * drag;
     P[i * 3] += V[i * 3] * dt; P[i * 3 + 1] += V[i * 3 + 1] * dt; P[i * 3 + 2] += V[i * 3 + 2] * dt;
     if (P[i * 3 + 1] < 0.002) { P[i * 3 + 1] = 0.002; V[i * 3 + 1] = Math.abs(V[i * 3 + 1]) * 0.35; }
     const f = A[i] / L[i];

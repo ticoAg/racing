@@ -9,7 +9,7 @@
    exposure so speed reads as motion blur.
    ========================================================================= */
 const WORLD = {
-  mix: 0, target: 0, reveal: -1, thAbs: 0, built: false,
+  mix: 0, target: 0, reveal: -1, thAbs: 0, built: false, kind: 'track',   // which world is out: the night circuit ('track') or the open country ('land')
   group: null, walls: [], masts: [], heads: null, halos: null, cones: null, boards: [], gantries: [], sky: null, horizon: null, farGround: null,
   lights: [], U: null,
 };
@@ -17,7 +17,7 @@ const EXPO = 1 / 90;
 // shared uniforms for every world shader
 const WU = {
   uTime: { value: 0 }, uReveal: { value: -1 }, uMix: { value: 0 }, uFogCol: { value: new THREE.Color(0x0d1219) }, uFogD: { value: 0.0016 },
-  uSOff: { value: 0 }, uV: { value: 0 }, uK: { value: 0 }, uExpo: { value: EXPO }, uBlur: { value: 0 },
+  uSOff: { value: 0 }, uV: { value: 0 }, uVz: { value: 0 }, uW: { value: 0 }, uExpo: { value: EXPO }, uBlur: { value: 0 },
   uLampD: { value: TRACK.LAMP_D }, uLampN: { value: TRACK.LAMP_N }, uLampH: { value: TRACK.LAMP_H }, uLampI: { value: 1.45 }, uHeadI: { value: 1.0 },
 };
 const GLSL_HASH = `
@@ -26,13 +26,13 @@ float vnoise(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2
   return mix(mix(hash12(i), hash12(i + vec2(1.0, 0.0)), u.x), mix(hash12(i + vec2(0.0, 1.0)), hash12(i + vec2(1.0, 1.0)), u.x), u.y); }
 `;
 const GLSL_WORLD = GLSL_HASH + `
-uniform float uTime, uReveal, uMix, uFogD, uSOff, uV, uK, uExpo, uBlur, uLampD, uLampN, uLampH, uLampI, uHeadI;
+uniform float uTime, uReveal, uMix, uFogD, uSOff, uV, uVz, uW, uExpo, uBlur, uLampD, uLampN, uLampH, uLampI, uHeadI;
 uniform vec3 uFogCol;
 // the circuit materialises around the car out to uReveal metres
 float revealVis(vec3 wp){ float d = length(wp.xz); float e = 3.0 + max(uReveal, 0.0) * 0.25; return uReveal < 0.0 ? 0.0 : 1.0 - smoothstep(uReveal - e, uReveal, d); }
 float fogF(vec3 wp){ float x = uFogD * distance(wp, cameraPosition); return 1.0 - exp(-x * x); }
-// velocity of a point fixed to the ground, seen from the car (yaw rate = v * k)
-vec3 groundVel(vec3 p){ return vec3(-uV + uV * uK * p.z, 0.0, -uV * uK * p.x); }
+// velocity of a point fixed to the ground, seen from the car (its speed forward and to the right, its yaw rate)
+vec3 groundVel(vec3 p){ return vec3(-uV + uW * p.z, 0.0, -uVz - uW * p.x); }
 // floodlight irradiance at road coordinates (s, n), height y, surface normal N (x along, y up, z across); 1.0 right under a lamp
 float lampE(float s, float n, float y, vec3 N){
   float E = 0.0, j0 = floor(s / uLampD);
@@ -85,7 +85,7 @@ const FloorShader = {
     tShadow: { value: null }, uShadowScale: { value: new THREE.Vector2(1 / SHW, 1 / SHD) },
     uNear: { value: new THREE.Color(0x2b2d33) }, uFar: { value: new THREE.Color(0x15171b) },
     uReflect: { value: 0.55 }, uTexel: { value: new THREE.Vector2(1 / 1024, 1 / 1024) },
-    uBelt: { value: 0 }, uBeltOff: { value: 0 },
+    uBelt: { value: 0 }, uBeltOff: { value: 0 }, uLand: { value: 0 },
     uPatch: { value: Array.from({ length: PATCH_N / 2 }, (_, i) => new THREE.Vector4(PATCHES[i * 4], PATCHES[i * 4 + 1], PATCHES[i * 4 + 2], PATCHES[i * 4 + 3])) },
   }, WU),
   vertexShader: `uniform mat4 textureMatrix; attribute vec2 aRoad; attribute vec4 aFeat;
@@ -97,7 +97,7 @@ const FloorShader = {
       #include <logdepthbuf_vertex>
     }`,
   fragmentShader: `uniform vec3 color; uniform sampler2D tDiffuse; uniform sampler2D tShadow; uniform vec2 uShadowScale;
-    uniform vec3 uNear; uniform vec3 uFar; uniform float uReflect; uniform vec2 uTexel; uniform float uBelt; uniform float uBeltOff;
+    uniform vec3 uNear; uniform vec3 uFar; uniform float uReflect; uniform vec2 uTexel; uniform float uBelt; uniform float uBeltOff; uniform float uLand;
     uniform vec4 uPatch[${PATCH_N / 2}];
     varying vec4 vUv; varying vec3 vWorld; varying vec2 vRoad; varying vec4 vFeat;
     ${GLSL_WORLD}
@@ -154,6 +154,8 @@ const FloorShader = {
         vec3 sc = base + r * k;
         col = mix(sc, uFar, smoothstep(0.8, 1.6, d));
       }
+      // (the open country is drawn by its own meshes: where it has come out, the floor makes way)
+      if (uLand > 0.5 && vis > 0.001) { if (vis >= hash12(gl_FragCoord.xy)) discard; vis = 0.0; }
       // ---------- circuit ----------
       if (vis > 0.001) {
         float s = vRoad.x + uSOff, n = vRoad.y, an = abs(n), side = n < 0.0 ? -1.0 : 1.0;
@@ -698,31 +700,34 @@ function updateWorld(dt, snap = false) {
     const rate = WORLD.target > WORLD.mix ? 1 / 1.5 : 1 / 1.7;
     WORLD.mix = WORLD.target > WORLD.mix ? Math.min(WORLD.target, WORLD.mix + dt * rate) : Math.max(WORLD.target, WORLD.mix - dt * rate);
   }
-  const m = WORLD.mix;
+  const m = WORLD.mix, land = WORLD.kind === 'land';
   WU.uMix.value = m;
-  // the circuit spreads out from under the car: metres at first, past the horizon at the end
+  // the world spreads out from under the car: metres at first, past the horizon at the end
   WU.uReveal.value = m <= 0 ? -1 : m >= 1 ? 1e5 : 2 * Math.pow(900, m);
   WU.uTime.value = clock.elapsedTime;
   envBlend(m);
-  backdrop.material.uniforms.uNight.value = m;
+  backdrop.material.uniforms.uNight.value = land ? 0 : m;
   floor.material.uniforms.uReflect.value = 0.55;
+  floor.material.uniforms.uLand.value = land ? 1 : 0;
+  floor.visible = !(land && m >= 1);
   floor.material.uniforms.uBelt.value += ((AERO.on && d.prog === 'park' && d.v < 0.5 ? 1 : 0) * (1 - m) - floor.material.uniforms.uBelt.value) * (snap ? 1 : 1 - Math.exp(-dt * 4));
   floor.material.uniforms.uBeltOff.value = (floor.material.uniforms.uBeltOff.value + airspeed() * dt * 0.08) % 4.6;
-  const active = m > 0 || WORLD.lights.some((l) => l.intensity > 0);
+  const landOn = updateLand(dt, snap);
+  const active = !land && (m > 0 || WORLD.lights.some((l) => l.intensity > 0));
   if (!active) {
     WORLD.group.visible = false;
     for (const l of WORLD.lights) l.intensity = 0;
     // the floor still needs a valid ground under the parked car
-    const key = d.s.toFixed(2) + '|' + d.n.toFixed(3);
-    if (WORLD.groundKey !== key) { WORLD.groundKey = key; trackFrame(d.s, d.n, d.psi); updateGround(); }
-    return snap ? false : m !== WORLD.target;
+    const key = land ? 'land' : d.s.toFixed(2) + '|' + d.n.toFixed(3);
+    if (WORLD.groundKey !== key) { WORLD.groundKey = key; if (land) trackFrame(0, 0, 0); else trackFrame(d.s, d.n, d.psi); updateGround(); }
+    return landOn || (snap ? false : m !== WORLD.target);
   }
   WORLD.groundKey = '';
   WORLD.group.visible = true;
   WORLD.thAbs += d.v * d.k * dt;
   trackFrame(d.s, d.n, d.psi);
   WU.uSOff.value = pmod(d.s);
-  WU.uV.value = d.v; WU.uK.value = d.k; WU.uBlur.value = d.v * EXPO;
+  WU.uV.value = d.v; WU.uVz.value = 0; WU.uW.value = d.v * d.k; WU.uBlur.value = d.v * EXPO;
   WU.uHeadI.value = state.lights ? 1 : 0;
   updateGround();
   for (const w of WORLD.walls) updateWall(w);
@@ -754,11 +759,13 @@ function setupEnvBlend(studio, track) {
 }
 function envBlend(t) {
   if (!ENV.blend) return;
-  const q = Math.round(t * 60) / 60;
-  if (q === ENV.last) return;
-  ENV.last = q;
+  const land = WORLD.kind === 'land' && ENV.land, q = Math.round(t * 60) / 60, key = q + (land ? 1000 : 0);
+  if (key === ENV.last) return;
+  ENV.last = key;
+  const out = land ? ENV.land : ENV.track;
   if (q <= 0) { scene.environment = ENV.studio.texture; return; }
-  if (q >= 1) { scene.environment = ENV.track.texture; return; }
+  if (q >= 1) { scene.environment = out.texture; return; }
+  ENV.mat.uniforms.tB.value = out.texture;
   ENV.mat.uniforms.uT.value = q;
   const prev = renderer.getRenderTarget();
   renderer.setRenderTarget(ENV.blend);
