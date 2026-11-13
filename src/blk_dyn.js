@@ -16,7 +16,7 @@ const FREE = {
   u: 0, w: 0, r: 0,                  // speed forward and to the right, yaw rate (clockwise from above)
   wf: 0, wr: 0,                      // axle speeds (rad/s)
   zb: 0, zbV: 0, pitch: 0, pitchV: 0, roll: 0, rollV: 0,   // sprung body: height, nose-up pitch, right-side-down roll
-  delta: 0, steer: 0, thr: 0, brk: 0, hb: 0, rev: false, revT: 0,
+  delta: 0, steer: 0, thr: 0, brk: 0, hb: 0, rev: false, revT: 0, keyT: 0, keyD: 0,
   absF: 1, absR: 1, tc: 1, upT: 0, split: 0.4,
   air: 0, airT: 0, landV: 0, ax: 0, ay: 0, hit: 0, hitSide: 0, scrape: 0, wet: 0, wetT: 0, sq: 0, loose: 0, rough: 0, esc: 0,
   s: 0, n: 0, onRoad: false, roadI: -1, surf: 0, offT: 0,
@@ -160,7 +160,15 @@ function dynStep(h) {
     if (V > VCAP) Te *= clamp(1 - (V - VCAP) / 2, 0, 1);
     if (gear < 0) Te *= 0.6 * clamp(1 - (vAbs - 13) / 3, 0, 1);
   }
-  const Td = Te * ratio * P.eta;
+  let Td = Te * ratio * P.eta;
+  // traction control, looking ahead: the engine is held to what the driven tyres can still put down beside the
+  // cornering force they are carrying (the slip-based trim below catches what this misses)
+  if (F.assist.tcs && F.hb < 0.2 && running) {
+    let room = 0;
+    for (let i = split > 0 ? 0 : 2; i < 4; i++) { const q = W[i]; room += Math.sqrt(Math.max(0, q.fmax * q.fmax * 0.94 - q.fy * q.fy)) * q.R; }
+    const lim = Math.max(room * (split > 0 ? 1 : 1) * 1.04, 0.12 * Math.abs(Td));
+    if (Math.abs(Td) > lim && V > 3) Td = Math.sign(Td) * lim;
+  }
   _dT[0] = Td * split; _dT[1] = Td * (1 - split);
   _dB[0] = F.brk * 0.7 * D.Tb * F.absF;
   _dB[1] = F.brk * 0.3 * D.Tb * F.absR + F.hb * 1.4 * P.mu0 * (W[2].F + W[3].F + 800) * AX[1].R;
@@ -384,8 +392,10 @@ function dynControls(dt, raw) {
   if (raw.digital) {
     F.thr = to(F.thr, thr, 5.5, 9); F.brk = to(F.brk, brk, 6.5, 10);
     // steering: quick at parking speeds, calmer as the speed rises; faster back to centre than away from it
-    const away = Math.sign(raw.steer) === Math.sign(F.steer) && Math.abs(raw.steer) > Math.abs(F.steer) || F.steer === 0;
-    const rate = away ? lerp(3.4, 1.5, sstep(15, 70, V)) : 5.5;
+    // a tap moves the wheel a little, a key held down turns it faster and faster
+    const away = raw.steer !== 0 && (Math.sign(raw.steer) === Math.sign(F.steer) || F.steer === 0);
+    F.keyT = raw.steer !== 0 && raw.steer === F.keyD ? F.keyT + dt : 0; F.keyD = raw.steer;
+    const rate = away ? lerp(3.4, 1.7, sstep(15, 70, V)) * lerp(0.3, 1, sstep(0, 0.3, F.keyT)) : raw.steer !== 0 ? 5.5 : lerp(4.5, 2.6, sstep(15, 70, V));
     F.steer = to(F.steer, raw.steer, rate, rate);
   } else {
     const k = 1 - Math.exp(-dt * 22);

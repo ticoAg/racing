@@ -257,6 +257,43 @@ function buildProps() {
   box(-0.55, 0.55, -gs - 0.4, gs + 0.4, 7.0, 8.4, [0.07, 0.07, 0.08]);
   // marshals' posts at every bend: a small hut on a base
   for (const c of R.corners) if (c.peak > 1 / 130) { const s = (c.i0 - 30) * R.ds, n = -c.sgn * (HW + 7.5); box(s - 1.6, s + 1.6, n - 1.2, n + 1.2, 0, 0.5, [0.3, 0.3, 0.3]); box(s - 1.4, s + 1.4, n - 1, n + 1, 0.5, 2.7, [0.6, 0.32, 0.08]); box(s - 1.6, s + 1.6, n - 1.2, n + 1.2, 2.7, 2.85, [0.2, 0.2, 0.2]); const P = lgRoadPose(s, n, _sp1); casters.push([P.x, P.z, 1.6, 2.8]); solid.push([P.x, P.z, 1.5]); }
+  // the village and the barns (blk_landgen.js places them): walls on footings, gabled roofs, windows that light up at night
+  const wbox = (x, y, z, th, w, h, d, c, grad) => { m4.compose(v.set(x, y + h / 2, z), q.setFromEuler(e.set(0, -th, 0)), one); parts.push(tint(new THREE.BoxGeometry(w, h, d), c[0], c[1], c[2], grad).applyMatrix4(m4)); };
+  const gable = (x, y, z, th, w, d, rh, c) => {
+    const a = w / 2 + 0.4, b = d / 2 + 0.5, P = [[-a, 0, -b], [-a, 0, b], [-a, rh, 0], [a, 0, -b], [a, 0, b], [a, rh, 0]], pos = [];
+    for (const f of [[0, 2, 5], [0, 5, 3], [1, 4, 5], [1, 5, 2], [0, 1, 2], [3, 5, 4]]) for (const i of f) pos.push(...P[i]);
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.computeVertexNormals();
+    m4.compose(v.set(x, y, z), q.setFromEuler(e.set(0, -th, 0)), one); parts.push(tint(g, c[0], c[1], c[2]).applyMatrix4(m4));
+  };
+  const rh = lgRand(1618), glassC = [0.05, 0.08, 0.13];
+  for (const b of LG.houses) {
+    const cs = Math.cos(b.th), sn = Math.sin(b.th), y0 = b.y - 0.8, hgt = b.top - y0 + b.e, t = rh();
+    const at = (lx, lz) => [b.x + lx * cs - lz * sn, b.z + lx * sn + lz * cs];
+    if (b.kind === 2) {
+      wbox(b.x, y0, b.z, b.th, b.w, hgt, b.d, [0.27, 0.085, 0.06], [-hgt / 2, hgt / 2, 0.25]);
+      gable(b.x, y0 + hgt, b.z, b.th, b.w, b.d, 3.4, [0.19, 0.19, 0.2]);
+      const [dx, dz] = at(b.w / 2 + 0.03, 0); wbox(dx, y0 + 0.8, dz, b.th, 0.08, 3.6, 4.4, [0.07, 0.05, 0.04]);
+    } else if (b.kind === 1) {
+      const stone = [0.44, 0.42, 0.38], slate = [0.12, 0.13, 0.15];
+      wbox(b.x, y0, b.z, b.th, b.w, hgt, b.d, stone, [-hgt / 2, hgt / 2, 0.2]);
+      gable(b.x, y0 + hgt, b.z, b.th + Math.PI / 2, b.d, b.w, 5.5, slate);
+      const [tx, tz] = at(0, -b.d / 2 - 2.6);
+      wbox(tx, y0, tz, b.th, 6, hgt + 14, 6, stone, [-(hgt + 14) / 2, (hgt + 14) / 2, 0.2]);
+      m4.compose(v.set(tx, y0 + hgt + 14 + 5.5, tz), q.setFromEuler(e.set(0, -b.th + Math.PI / 4, 0)), one);
+      parts.push(tint(new THREE.ConeGeometry(4.6, 11, 4), ...slate).applyMatrix4(m4));
+      for (const sd of [-1, 1]) for (let k = -1; k <= 1; k++) { const [wx, wz] = at(sd * (b.w / 2 + 0.03), k * 5.5); wbox(wx, y0 + hgt - 5.6, wz, b.th, 0.08, 4.2, 1.3, glassC); }
+      casters.push([tx, tz, 3.4, hgt + 22]);
+    } else {
+      const wall = t < 0.4 ? [0.5, 0.47, 0.4] : t < 0.75 ? [0.46, 0.4, 0.31] : [0.4, 0.4, 0.38], tile = t * 7 % 1 < 0.7 ? [0.33, 0.13, 0.075] : [0.15, 0.16, 0.18];
+      wbox(b.x, y0, b.z, b.th, b.w, hgt, b.d, wall, [-hgt / 2, hgt / 2, 0.18]);
+      gable(b.x, y0 + hgt, b.z, b.th, b.w, b.d, 2.2 + 1.2 * rh(), tile);
+      const nW = Math.max(2, Math.round(b.w / 3.4));
+      for (const sd of [-1, 1]) for (let k = 0; k < nW; k++) { const [wx, wz] = at((k + 0.5) / nW * b.w - b.w / 2, sd * (b.d / 2 + 0.03)); wbox(wx, b.top + b.e - 2.3, wz, b.th, 1.0, 1.25, 0.08, glassC); }
+      // a chimney
+      const [cx, cz] = at(b.w * 0.28, 0); wbox(cx, y0 + hgt + 0.6, cz, b.th, 0.7, 2.6, 0.7, [0.3, 0.2, 0.16]);
+    }
+    casters.push([b.x, b.z, Math.max(b.w, b.d) * 0.5, hgt + 2.5]);
+  }
   const stat = new THREE.Mesh(mergeGeometries(parts), sceneryStatic());
   stat.frustumCulled = false;
   LAND.group.add(stat);
@@ -399,7 +436,10 @@ function updateSkid() {
     const hw = AX[i < 2 ? 0 : 1].w * 0.42, y = q.g + 0.012;
     // across the direction the tyre's patch is moving in
     const cur = [q.wx - sn * hw, y, q.wz + cs * hw, q.wx + sn * hw, y, q.wz - cs * hw, k];
-    if (L && Math.hypot(cur[0] - L[0], cur[2] - L[2]) < 0.35) continue;
+    const far = L ? Math.hypot(cur[0] - L[0], cur[2] - L[2]) : 0;
+    if (L && far < 0.35) continue;
+    // (a car put somewhere else starts a new mark)
+    if (far > 4) { K.last[i] = cur; continue; }
     if (L) {
       const o = K.n * 12, a = K.n * 4; K.n = (K.n + 1) % SKID_N;
       P.array.set([L[0], L[1], L[2], L[3], L[4], L[5], cur[0], cur[1], cur[2], cur[3], cur[4], cur[5]], o);

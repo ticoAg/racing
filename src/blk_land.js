@@ -238,7 +238,7 @@ function landTerrainMat() {
       float h = vLP.y, n2 = vnoise(xz / 17.0), n4 = vnoise(xz / 61.0 + 3.3);
       vec3 alb = grassCol(xz, fine);
       // tufts and blades close to the eye
-      alb *= 1.0 + fine * 0.35 * (vnoise(xz * vec2(7.0, 2.3)) - 0.5);
+      alb *= 1.0 + fine * 0.35 * (vnoise(xz * vec2(7.0, 2.3)) - 0.5) + (1.0 - smoothstep(8.0, 45.0, dist)) * 0.3 * (vnoise(xz * 5.3) - 0.5);
       // farmland on the low, level ground: fields of different crops worked in rows, hedges between them
       vec2 fp = xz / 170.0 + vec2(vnoise(xz / 430.0 + 1.3), vnoise(xz / 430.0 + 9.7)) * 1.5;
       vec2 fc = floor(fp), ff = fract(fp);
@@ -253,7 +253,9 @@ function landTerrainMat() {
       vec3 earth = mix(vec3(0.15, 0.11, 0.07), vec3(0.23, 0.18, 0.115), n4) * (0.85 + 0.3 * vnoise(xz / 1.3) * fine);
       alb = mix(alb, earth, smoothstep(0.25, 0.75, bio.r + (n2 - 0.5) * 0.3));
       float steep = smoothstep(0.82, 0.62, N.y + (n4 - 0.5) * 0.12);
-      vec3 rock = mix(vec3(0.085, 0.08, 0.078), vec3(0.19, 0.17, 0.15), vnoise(vec2(xz.x / 23.0 + h * 0.11, h * 0.21 + xz.y / 31.0) + 3.0 * vnoise(xz / 90.0))) * (0.8 + 0.4 * vnoise(xz / 4.1));
+      // rock: beds that dip and fold, gullies down the fall line, scree colours
+      float bed = vnoise(vec2((xz.x + xz.y) / 70.0, h * 0.16 + 2.5 * vnoise(xz / 120.0)));
+      vec3 rock = mix(vec3(0.085, 0.08, 0.078), vec3(0.17, 0.155, 0.14), 0.35 * bed + 0.65 * vnoise(xz / 37.0 + 5.1)) * (0.75 + 0.5 * vnoise(xz / 9.0 + h * 0.05));
       alb = mix(alb, rock, max(steep, smoothstep(0.35, 0.9, bio.b)));
       alb = mix(alb, vec3(0.4, 0.34, 0.235) * (0.9 + 0.2 * n2), bio.a);
       float snow = smoothstep(265.0, 330.0, h + 50.0 * n4) * smoothstep(0.55, 0.8, N.y);
@@ -261,8 +263,10 @@ function landTerrainMat() {
       // under the lake
       float deep = clamp((L_WATER - h) / 4.0, 0.0, 1.0);
       alb = mix(alb, alb * vec3(0.3, 0.5, 0.5), deep);
-      // small relief in the light
-      N = normalize(N + vec3(vnoise(xz / 2.9) - 0.5, 0.0, vnoise(xz / 2.9 + 31.7) - 0.5) * 0.3 * fine);
+      // small relief in the light; crags on the rock faces, which read from far off
+      float crag = max(steep, smoothstep(0.35, 0.9, bio.b)) * (1.0 - snow * 0.6);
+      N = normalize(N + vec3(vnoise(xz / 2.9) - 0.5, 0.0, vnoise(xz / 2.9 + 31.7) - 0.5) * 0.3 * fine
+        + vec3(vnoise(xz / 26.0 + 2.2) - 0.5, 0.0, vnoise(xz / 26.0 + 17.9) - 0.5) * 0.9 * crag + vec3(vnoise(xz / 7.0) - 0.5, 0.0, vnoise(xz / 7.0 + 41.0) - 0.5) * 0.5 * crag);
       outC = landLit(alb, N, vLP, vWP, 0.82);`,
   });
 }
@@ -428,8 +432,8 @@ function buildWater() {
       vec3 V = normalize(uToLand * (cameraPosition - vWP));
       vec3 Rr = reflect(-V, N); Rr.y = abs(Rr.y);
       float fres = 0.03 + 0.97 * pow(1.0 - max(dot(V, N), 0.0), 5.0);
-      vec3 deep = vec3(0.012, 0.05, 0.06) * (uSkyCol.b * 3.0 + 0.12) + uSunCol * vec3(0.004, 0.012, 0.011);
-      outC = mix(deep, skyCol(Rr, t), fres);
+      vec3 deep = vec3(0.01, 0.045, 0.06) * (uSkyCol.b * 3.0 + 0.12) + uSunCol * vec3(0.003, 0.012, 0.012);
+      outC = mix(deep, skyCol(Rr, t) * 0.9, fres);
       outC += uSunCol * pow(max(dot(Rr, uSunDir), 0.0), 600.0) * 5.0 * cloudShade(xz);
       // the shallows show the bed, the edge wets the sand
       alpha = smoothstep(-0.05, 1.4, depth) * 0.92 + 0.06;`,

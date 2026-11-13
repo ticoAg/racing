@@ -21,7 +21,7 @@ for (let i = 0; i < R.n; i++) {
 const wl = (A) => { let n = 0; for (let i = 0; i < R.n; i++) if (A[i]) n++; return n; };
 console.log({ length: +R.L.toFixed(1), samples: R.n, tightestRadius: +(1 / kmax).toFixed(1), steepest: +(gmax * 100).toFixed(1) + '%', low: +hmin.toFixed(1), high: +hmax.toFixed(1),
   farthest: +rmax.toFixed(0), cut40: +cut.toFixed(1), fill40: +fill.toFixed(1), corners: R.corners.length, kerbs: LG.kerbs.length, walls: LG.walls.length, wallL: wl(R.wallL), wallR: wl(R.wallR),
-  trees: LG.trees.n, rocks: LG.rocks.n, obstacles: LG.obst.list.length / 3, spawn: LG.spawn });
+  trees: LG.trees.n, rocks: LG.rocks.n, buildings: LG.houses.length, obstacles: LG.obst.list.length / 3, spawn: LG.spawn });
 // the road must lie on top of the land along its whole width, and the land must come up over the verge's outer edge
 {
   let poke = 0, gap = 0, n = 0;
@@ -68,6 +68,7 @@ const dot = (x, z, col, r = 0) => {
 if (span < 1500) for (let i = 0; i < LG.trees.n; i++) dot(LG.trees.x[i], LG.trees.z[i], LG.trees.kind[i] === 0 ? [20, 70, 40] : LG.trees.kind[i] === 1 ? [60, 120, 30] : [140, 170, 40], 0);
 for (const w of LG.walls) for (let i = w.i0; i < w.i1; i++) { lgRoadPose(i * R.ds, w.side * api.LG_WALL_N[w.kind], p); dot(p.x, p.z, w.kind === 2 ? [255, 255, 255] : [255, 170, 0], 0); }
 if (span > 1500) for (let i = 0; i < R.n; i++) dot(R.x[i], R.z[i], [250, 250, 250], 1);
+for (const b of LG.houses) dot(b.x, b.z, b.kind === 2 ? [150, 30, 20] : [240, 120, 60], span > 1500 ? 2 : 3);
 for (let s = 0; s < R.L; s += 500) { lgRoadPose(s, 0, p); dot(p.x, p.z, s === 0 ? [255, 0, 0] : [255, 220, 0], span > 1500 ? 4 : 2); }
 // minimal PNG writer
 const crcT = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();

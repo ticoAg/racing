@@ -2990,7 +2990,7 @@ window.__info = () => {
 };
 window.__cam = () => camera.fov;
 window.__ui = { setOption, applyPreset, setDoors, setWingUp, setPose, setLights, setExplode, setModule, goView, setPanel, setAero, setModel, state, DRIVE, AERO, FX, WORLD, TRACK, FLOW, XPL, BODY, MODELS, get SPEC() { return SPEC; },
-  FREE, LAND, LG, CHASE, INPUT, LU, landSetTod, freeAction, freeReset, lgRoadPose, lgGround,
+  FREE, LAND, LG, CHASE, INPUT, LU, SCN, landSetTod, freeAction, freeReset, freePlace, lgRoadPose, lgGround, lgLandH,
   // a part picked up by its name, let go, and where its middle is in the picture (client px)
   pick: (key) => xplPick(XPL.items.find((it) => it.key === key)), drop: xplDrop,
   spot: (key) => { const it = XPL.items.find((i) => i.key === key), r = canvas.getBoundingClientRect(), v = it.c.clone().add(it.pos).project(camera); return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height]; },

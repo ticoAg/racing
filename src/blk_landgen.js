@@ -20,7 +20,7 @@ const LG = {
   TRENCH: 0.35,           // how far the land lies under the road's mesh
   NEAR_CELL: 8, NEAR_N: 512, NEAR_R: 88,
   ready: false, H: null, biome: null, near: null, D16: null,
-  road: null, walls: [], kerbs: [], trees: null, rocks: null, obst: null,
+  road: null, walls: [], kerbs: [], trees: null, rocks: null, obst: null, houses: [],
   spawn: { x: 0, z: 0, th: 0 },
 };
 
@@ -475,6 +475,31 @@ function lgInStadium(x, z) {
   const o = {};
   return lgRoadAt(x, z, o) && Math.abs(o.n) < 44 && lgStadium(o.i) > 0.01;
 }
+// buildings out in the country: a village by the lake road (houses round a church) and barns among the fields.
+// Each: x, z, turn, width, depth, height to the eaves, kind (0 house, 1 church, 2 barn), the ground under it
+const LG_VILLAGE = { x: 610, z: 260, r: 105 };
+function lgBuildHouses() {
+  const rnd = lgRand(2718), H = [], V = LG_VILLAGE;
+  const ground = (x, z, w, d, th) => { let lo = 1e9, hi = -1e9; for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, 0]]) { const px = x + a * w / 2 * Math.cos(th) - b * d / 2 * Math.sin(th), pz = z + a * w / 2 * Math.sin(th) + b * d / 2 * Math.cos(th), g = lgLandH(px, pz); lo = Math.min(lo, g); hi = Math.max(hi, g); } return [lo, hi]; };
+  const free = (x, z, r) => H.every((h) => Math.hypot(h.x - x, h.z - z) > r + Math.max(h.w, h.d) * 0.75);
+  const add = (x, z, th, w, d, e, kind) => { const [lo, hi] = ground(x, z, w, d, th); if (hi - lo > 2.2 || lo < LG.WATER + 1) return false; H.push({ x, z, th, w, d, e, kind, y: lo, top: hi }); return true; };
+  // the church stands in the middle, the houses along two lanes that cross there
+  add(V.x, V.z, 0.35, 9, 22, 9, 1);
+  for (let q = 0; q < 400 && H.length < 19; q++) {
+    const lane = rnd() < 0.5 ? 0.35 : 0.35 + Math.PI / 2, t = (rnd() - 0.5) * 2 * V.r, side = (rnd() < 0.5 ? -1 : 1) * (9 + 5 * rnd());
+    const x = V.x + Math.cos(lane) * t - Math.sin(lane) * side, z = V.z + Math.sin(lane) * t + Math.cos(lane) * side;
+    if (Math.hypot(x - V.x, z - V.z) < 20 || !free(x, z, 9)) continue;
+    add(x, z, lane + (rnd() - 0.5) * 0.2 + (rnd() < 0.3 ? Math.PI / 2 : 0), 8 + 5 * rnd(), 6.5 + 2.5 * rnd(), 3.2 + 2.4 * rnd(), 0);
+  }
+  // barns on the level low ground away from the road
+  for (let q = 0; q < 3000 && H.length < 27; q++) {
+    const x = (rnd() - 0.5) * 2600, z = (rnd() - 0.5) * 2600, D = lgField(LG.D16, 257, x, z), h = lgLandH(x, z);
+    if (D < 70 || h > 50 || h < LG.WATER + 2 || Math.hypot(x - V.x, z - V.z) < V.r + 120 || !free(x, z, 160) || lgInStadium(x, z)) continue;
+    add(x, z, rnd() * 3.14, 20, 10, 4.6, 2);
+  }
+  LG.houses = H;
+}
+const lgNearHouse = (x, z, pad) => { if (Math.hypot(x - LG_VILLAGE.x, z - LG_VILLAGE.z) < LG_VILLAGE.r + pad) return true; for (const h of LG.houses) if (Math.hypot(h.x - x, h.z - z) < Math.max(h.w, h.d) * 0.75 + pad) return true; return false; };
 // trees: x, z, ground height, size, kind (0 conifer, 1 broadleaf, 2 poplar), turn, shade of green
 function lgBuildTrees() {
   const rnd = lgRand(4711), T = { n: 0, x: [], z: [], y: [], s: [], kind: [], rot: [], tint: [] }, N = LG.N, H = LG.H;
@@ -492,6 +517,8 @@ function lgBuildTrees() {
     // a few lone trees stand in the open country
     const lone = D > LG.HW + 16 && h > LG.WATER + 1.5 && h < 150 && slope < 0.45 ? 0.012 : 0;
     if (u > w * 0.8 + lone || lgInStadium(x, z)) continue;
+    // the village keeps a few trees between its houses, none through their walls
+    if (lgNearHouse(x, z, 4) && (v > 0.25 || LG.houses.some((b) => Math.hypot(b.x - x, b.z - z) < Math.max(b.w, b.d) * 0.75 + 3))) continue;
     const high = lsmooth(60, 130, h + 25 * gnoise(x / 200, z / 200));
     add(x, z, v < 0.12 + 0.82 * high ? 0 : 1, 0.75 + 0.6 * rnd());
   }
@@ -523,6 +550,7 @@ function lgBuildObstacles(extra = []) {
   for (let i = 0; i < T.n; i++) list.push(T.x[i], T.z[i], (T.kind[i] === 0 ? 0.3 : 0.38) * T.s[i]);
   for (let i = 0; i < K.n; i++) if (K.s[i] > 0.75) list.push(K.x[i], K.z[i], K.s[i] * 0.62);
   for (const e of extra) list.push(e[0], e[1], e[2]);
+  for (const b of LG.houses) { const long = Math.max(b.w, b.d), short = Math.min(b.w, b.d), a = b.w >= b.d ? b.th : b.th + Math.PI / 2, n = Math.max(1, Math.round(long / short)); for (let i = 0; i < n; i++) { const t = n === 1 ? 0 : (i / (n - 1) - 0.5) * (long - short); list.push(b.x + Math.cos(a) * t, b.z + Math.sin(a) * t, short * 0.56); } }
   const C = 16, n = LG.SIZE / C, cnt = new Uint32Array(n * n + 1), m = list.length / 3;
   const cell = (q) => Math.max(0, Math.min(n - 1, Math.floor((list[q * 3 + 1] + LG.HALF) / C))) * n + Math.max(0, Math.min(n - 1, Math.floor((list[q * 3] + LG.HALF) / C)));
   for (let q = 0; q < m; q++) cnt[cell(q) + 1]++;
@@ -540,6 +568,6 @@ function lgSteps() {
     () => lgBuildLand(),
     () => lgBuildWalls(),
     () => lgBuildBiome(),
-    () => { lgBuildTrees(); lgBuildObstacles(); LG.ready = true; },
+    () => { lgBuildHouses(); lgBuildTrees(); lgBuildObstacles(); LG.ready = true; },
   ];
 }

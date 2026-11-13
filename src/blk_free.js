@@ -70,7 +70,7 @@ function freeKeys() {
 function freeInput(dt) {
   const I = INPUT, r = I.raw, K = I.keys;
   r.steer = (K.has('right') ? 1 : 0) - (K.has('left') ? 1 : 0); r.thr = K.has('thr') ? 1 : 0; r.brk = K.has('brk') ? 1 : 0; r.hb = K.has('hb') ? 1 : 0; r.digital = true;
-  if (I.touch.on) { const T = I.touch; r.steer = Math.sign(T.steer) * Math.pow(Math.abs(T.steer), 1.5); r.thr = T.thr; r.brk = T.brk; r.hb = T.hb; r.digital = false; r.pedals = true; } else r.pedals = false;
+  if (I.touch.on) { const T = I.touch; r.steer = Math.sign(T.steer) * Math.pow(Math.abs(T.steer), 1.5); r.thr = T.thr; r.brk = T.brk; r.hb = T.hb; r.digital = false; }
   // a gamepad, once it has been touched, takes over: stick, triggers, A handbrake, Y camera, X reset, B look back
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   for (const p of pads) {
@@ -80,11 +80,18 @@ function freeInput(dt) {
     if (Math.abs(st) + th + br + b(0) > 0.05) { I.padT = 4; I.touch.on = false; }
     if (I.padT > 0) {
       I.padT -= dt;
-      r.steer = Math.sign(st) * Math.pow(Math.abs(st), 1.6); r.thr = th; r.brk = br; r.hb = b(0); r.digital = false; r.pedals = true;
+      r.steer = Math.sign(st) * Math.pow(Math.abs(st), 1.6); r.thr = th; r.brk = br; r.hb = b(0); r.digital = false;
       I.lookBack = b(1) > 0.5;
       [[3, 'cam'], [2, 'reset'], [9, 'leave'], [8, 'assist']].forEach(([i, a]) => { const on = b(i) > 0.5; if (on && !I.padPrev[i] && FREE.on) freeAction(a); I.padPrev[i] = on; });
       if (FREE.auto && Math.abs(st) + th + br > 0.2) { FREE.auto = false; toast('手动驾驶'); }
       if (p.axes.length >= 4) CHASE.stick = dz(p.axes[2]);
+      // the pad shakes with kerbs, sliding tyres, the anti-lock, loose ground; harder for a blow or a landing
+      const va = p.vibrationActuator;
+      if (va && va.playEffect && FREE.on && (I.rumT = (I.rumT || 0) - dt) <= 0) {
+        I.rumT = 0.08;
+        const weak = clamp(0.5 * (DRIVE.kerbL + DRIVE.kerbR) + 0.5 * FREE.sq + 0.4 * DRIVE.abs + 0.5 * FREE.loose * sstep(2, 20, DRIVE.v), 0, 1), strong = clamp(FREE.hit * 1.2, 0, 1);
+        if (weak + strong > 0.03) { try { const pr = va.playEffect('dual-rumble', { duration: 100, weakMagnitude: weak, strongMagnitude: strong }); if (pr && pr.catch) pr.catch(() => {}); } catch (e) { /* no rumble on this pad */ } }
+      }
     }
     break;
   }

@@ -1,7 +1,7 @@
 // Free driving in the real page: out of the studio onto the land with a click, away under the keys (throttle,
 // steering, brake, handbrake, reverse), the camera and the other switches, back onto the road, back to the studio,
 // then the same start for every model. Reports page errors. --shots saves pictures on the way (out/free_*.png).
-// usage: node tools/free.js [--shots] [--quick]
+// usage: node tools/free.js [--shots] [--quick]   (--quick leaves out the handbrake turn, the circuit and the other models)
 const http = require('http'), fs = require('fs'), path = require('path');
 const { chromium } = require('playwright');
 const root = path.join(__dirname, '..');
@@ -13,10 +13,12 @@ const server = http.createServer((req, res) => {
   tryRead([path.join(root, url), path.join(root, 'public', url)]);
 });
 const shots = process.argv.includes('--shots'), quick = process.argv.includes('--quick');
+// (pictures want a full-size page; without them a small one keeps the software renderer quick)
+const [VW, VH] = shots ? [960, 540] : [480, 300];
 (async () => {
   await new Promise((r) => server.listen(8771, r));
   const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
-  const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
+  const page = await browser.newPage({ viewport: { width: VW, height: VH } });
   page.setDefaultTimeout(600000);
   const errs = [];
   page.on('pageerror', (e) => errs.push('pageerror: ' + e.message));
