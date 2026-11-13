@@ -11,7 +11,7 @@ An original, fully procedural range of cars built with three.js — no model fil
 | **E4** | electric hypercar | four motors, 1400 kW | all four wheels, one gear | 1980 kg | 380 km/h | 1.9 s | 1.59 g | closed nose, long tapering tail, no pipes; motor song and regeneration |
 | **R10** | track car | 5.2 l V10, 625 kW, 10 500 rpm | rear, 6-speed sequential | 1180 kg | 325 km/h | 2.2 s | 3.4 g | roof scoop, fin, fixed wing, slicks and camber; shrieks over straight-cut gears |
 
-The model is chosen in the header (or with `?car=g8`, `e4`, `r10`); the car is taken apart and rebuilt in place, each model keeping its own configuration. All four share the carbon tub, the canopy and the butterfly doors.
+The model is chosen in the header (or with `?car=g8`, `e4`, `r10`); the car is taken apart and rebuilt in place, each model keeping its own configuration. A configuration can be written into the address too (`?car=g8&paint=lava&finish=matte&wing=none`; the [guide](https://racing.ticoag.fun/en/guide/) lists every value). All four share the carbon tub, the canopy and the butterfly doors.
 
 - Configurator: presets per model, 10 colours × 7 finishes (metallic, pearl, gloss, matte, chrome, chameleon, carbon), 4 wheel designs, rim and caliper colours, GT wing / active spoiler / no wing, track and road aero kits, 5 liveries, 4 interiors
 - Butterfly doors, deployable wing and airbrake
@@ -69,11 +69,15 @@ The model is chosen in the header (or with `?car=g8`, `e4`, `r10`); the car is t
 | `src/blk_flow.js` | 3D lattice-Boltzmann tunnel: solver, voxelised car, smoke streaklines, physics checks |
 | `src/blk_audio.js` | Sound engine (AudioWorklet engine voice from a firing table, electric motors, supercharger, gear whine) and music |
 | `src/blk_mech.js` | What is under the skin: engine, intake, manifolds, gearbox, shafts, exhaust and radiators, or motors, inverters and battery; wishbones, coil-overs, rack and anti-roll bars |
+| `src/blk_agent.js` | The controls offered as tools to an agent in the browser (WebMCP) |
 | `src/blk_explode.js` | Parts store: the systems and their bays, the floor plan packed from the parts' sizes, the skin cut into panels along the shut lines, inner faces for one-sided surfaces, the overview camera, the parts' names under the pointer, picking a part up to turn it in its own light |
 | `src/page.template.html` | Markup and styles |
 | `src/fonts.css` | `@font-face` rules for the self-hosted fonts (generated) |
 | `build.py` | Inlines the app into `public/index.html` and copies the three.js modules it imports into `public/vendor/` |
-| `public/` | Static site root. `fonts/` is committed; `index.html` and `vendor/` are generated |
+| `site/` | The reading pages as Markdown, in Chinese (`zh/`, served at the root) and English (`en/`, served under `/en/`), their template and stylesheet, and the agent skill |
+| `build_site.py` | Writes the reading pages, their Markdown twins, `sitemap.xml`, `llms.txt`, the structured data and the app page's head (called by `build.py`) |
+| `functions/_middleware.js` | Cloudflare Pages Function: answers a page asked for with `Accept: text/markdown` with its Markdown twin |
+| `public/` | Static site root. `fonts/`, `img/`, the icons, `robots.txt`, `_headers` and `_routes.json` are committed; everything else is generated |
 | `tools/` | Headless Playwright checks (renders, click-through, offline audio levels) |
 
 ## Build and run
@@ -97,6 +101,17 @@ python3 tools/subset_fonts.py
 
 Fonts and vendored modules have versioned or content-hashed URLs and are served with a one-year immutable cache (`public/_headers`).
 
+## Search engines and agents
+
+The app is one canvas, so what it shows is also written down, for people who search and for programs that read:
+
+- Reading pages: the range (`/models/`), each model with a spec sheet (`/models/h9/` …), a guide with the controls and an FAQ (`/guide/`), and how it works (`/tech/`), in Chinese at the root and in English under `/en/`. Their text is Markdown in `site/`; the spec sheets, the comparison table and the table of link parameters are filled in from `src/` by `tools/specs.js`, so they cannot drift from the app. The app's own page carries the Chinese overview inside its `<canvas>`, as the element's fallback content
+- Every page has a title, description, canonical address, `hreflang` twins, Open Graph card (1200 × 630 pictures rendered by `tools/og.js`) and JSON-LD: `WebSite`, `Organization`, `WebPage` with `BreadcrumbList`, and `WebApplication` and `ItemList` on the home pages, `FAQPage` on the guide, `TechArticle` on the technical page. The cars are fictional, so nothing is marked up as a product
+- `robots.txt` lets everyone in, AI search and training crawlers by name, with a Content Signal; `sitemap.xml` lists the 16 pages with their language twins
+- For language models: `/llms.txt` (the map), `/llms-full.txt` and `/llms-full.zh.txt` (every page in one file), and a Markdown twin of every page at `<page>index.md`. A page asked for with `Accept: text/markdown` is answered with that twin by the Pages Function (Cloudflare's own Markdown for Agents needs a paid plan). The home page's `Link` header points to all of these
+- For agents that work the page: the model and configuration can be set by link; every control is a button with a `data-` attribute and its state in ARIA; where the browser has WebMCP (`document.modelContext`), the page registers six tools (`get_configuration`, `select_model`, `set_options`, `set_view`, `run_program`, `set_feature`). `/.well-known/agent-skills/` describes all of this as an agent skill
+- An address that is not a page gets `404.html` (without that file Cloudflare Pages answers every address with the app). The project's `pages.dev` address is the same site and is sent with `X-Robots-Tag: noindex`
+
 ## Deploy (Cloudflare Pages)
 
 The Cloudflare Pages project `racing` is connected to this repository and builds on every push:
@@ -104,7 +119,12 @@ The Cloudflare Pages project `racing` is connected to this repository and builds
 - Build command: `npm ci && python3 build.py`
 - Build output directory: `public`
 
-Pushes to `main` go to production at https://racing.ticoag.fun (also https://racing-ddu.pages.dev); other branches get preview URLs.
+Pushes to `main` go to production at https://racing.ticoag.fun (also https://racing-ddu.pages.dev); other branches get preview URLs. `functions/` is picked up by the same build; it runs only on the pages' own addresses (`public/_routes.json`), and the static files are served as before if it fails.
+
+Two settings of the `ticoag.fun` zone act on crawlers before this site's own files do, for every hostname of the zone:
+
+- **Block AI bots** (Security → Settings → Bot traffic) refuses AI training crawlers at the edge with a 403 (GPTBot, ClaudeBot, CCBot, Bytespider, Amazonbot). AI search and assistants (OAI-SearchBot, ChatGPT-User, Claude-SearchBot, PerplexityBot) are let through.
+- The **managed robots.txt** puts Cloudflare's own groups in front of `public/robots.txt`: `Disallow: /` for the training crawlers and also for Baiduspider, PetalBot and KimiBot, and `ai-train=no`. `public/robots.txt` names those crawlers again with `Allow: /`, which wins where a crawler merges its groups as RFC 9309 says; turning the managed file off is the sure way.
 
 ## Tools
 
@@ -117,6 +137,9 @@ node tools/sim.js                            # free-driving vehicle model withou
 node tools/landmap.js                        # builds the free-driving map without a browser: length, bends, gradients, a picture of it (out/landmap.png); checks that the road lies on top of the land
 node tools/free.js                           # free driving in the real page: out of the studio, away under the keys, camera and switches, back again, every model (--shots saves pictures)
 node tools/selfhost_check.js                 # fails if the built page fetches anything off-site
+node tools/site.js                           # what search engines and agents read: every page's head, structured data, links and Markdown twin, robots.txt, llms.txt, Markdown by Accept header; then in the page: the configuration from the address, and the WebMCP tools (--files leaves the browser out)
+node tools/og.js                             # renders the pictures in public/img/ (each model's hero and social card, the parts store)
+node tools/specs.js                          # the models' figures and the option lists as JSON, as the reading pages get them
 node tools/hdr_check.js                      # fails if over-bright highlights turn into black blocks after bloom
 node tools/flow_check.js                     # airflow solver: drag of a square plate against the measured value, checks on the car's flow (--car=g8 for another model)
 node tools/explode.js                        # parts store: every model laid out and put together again (panels cover the skin, every part on the floor in its bay, none overlapping, the powertrain and suspension under the skin and over the floor, every part named under the pointer, a part picked up and let go, one system alone), then the buttons, a part picked up by a click, driving and airflow (--shots saves stills, --stills skips the clicks)

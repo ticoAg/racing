@@ -3,5 +3,17 @@ dev/
 out/
 .wrangler/
 .fontcache/
-public/index.html
-public/vendor/
+__pycache__/
+# public/ is the site's root: fonts, pictures, icons and the files Cloudflare Pages and crawlers read are committed,
+# everything else in it is written by build.py
+public/*
+!public/fonts/
+!public/img/
+!public/_headers
+!public/_routes.json
+!public/robots.txt
+!public/manifest.webmanifest
+!public/favicon.svg
+!public/apple-touch-icon.png
+!public/icon-192.png
+!public/icon-512.png

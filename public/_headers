@@ -2,6 +2,24 @@
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
 
+# the production site is racing.ticoag.fun: the project's own pages.dev address is the same site and stays out of the indexes
+https://racing-ddu.pages.dev/*
+  X-Robots-Tag: noindex
+
+# where an agent finds the site's map and the page as Markdown
+/
+  Link: </llms.txt>; rel="describedby"; type="text/plain", </index.md>; rel="alternate"; type="text/markdown", </sitemap.xml>; rel="sitemap"; type="application/xml", </guide/>; rel="service-doc"; type="text/html"
+
+# read by agents, not listed by search engines (the pages themselves are)
+/*.md
+  X-Robots-Tag: noindex
+/llms.txt
+  X-Robots-Tag: noindex
+/llms-full.txt
+  X-Robots-Tag: noindex
+/llms-full.zh.txt
+  X-Robots-Tag: noindex
+
 /vendor/*
   Cache-Control: public, max-age=31536000, immutable
   Access-Control-Allow-Origin: *
@@ -9,3 +27,6 @@
 /fonts/*
   Cache-Control: public, max-age=31536000, immutable
   Access-Control-Allow-Origin: *
+
+/img/*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
