@@ -121,10 +121,13 @@ The Cloudflare Pages project `racing` is connected to this repository and builds
 
 Pushes to `main` go to production at https://racing.ticoag.fun (also https://racing-ddu.pages.dev); other branches get preview URLs. `functions/` is picked up by the same build; it runs only on the pages' own addresses (`public/_routes.json`), and the static files are served as before if it fails.
 
-Two settings of the `ticoag.fun` zone act on crawlers before this site's own files do, for every hostname of the zone:
+Three settings of the `ticoag.fun` zone act on crawlers before this site's own files do, for every hostname of the zone. For the site to be read by search engines and AI crawlers alike, they are set so:
 
-- **Block AI bots** (Security → Settings → Bot traffic) refuses AI training crawlers at the edge with a 403 (GPTBot, ClaudeBot, CCBot, Bytespider, Amazonbot). AI search and assistants (OAI-SearchBot, ChatGPT-User, Claude-SearchBot, PerplexityBot) are let through.
-- The **managed robots.txt** puts Cloudflare's own groups in front of `public/robots.txt`: `Disallow: /` for the training crawlers and also for Baiduspider, PetalBot and KimiBot, and `ai-train=no`. `public/robots.txt` names those crawlers again with `Allow: /`, which wins where a crawler merges its groups as RFC 9309 says; turning the managed file off is the sure way.
+- **Block AI bots** (Security → Settings → Bot traffic) is **off**. On, it refuses AI training crawlers at the edge with a 403 (GPTBot, ClaudeBot, CCBot, Bytespider, Amazonbot).
+- The **managed robots.txt** is **off**. On, it puts Cloudflare's own groups in front of `public/robots.txt`: `Disallow: /` for the training crawlers and also for Baiduspider, PetalBot and KimiBot, and `ai-train=no`. `public/robots.txt` names the search engines again with `Allow: /` in case it is switched back on.
+- **Crawler Hints** (Caching → Configuration) is **on**: Bing, Yandex and the other search engines that take IndexNow are told when content changes.
+
+The rest of the zone's hostnames are open to these crawlers too. To close one again, use a WAF custom rule that names the hostname rather than the zone-wide switch.
 
 ## Tools
 
